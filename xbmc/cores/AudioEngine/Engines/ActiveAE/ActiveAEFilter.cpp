@@ -290,6 +290,14 @@ int CActiveAEFilter::ProcessFilter(uint8_t **dst_buffer, int dst_samples, uint8_
 
     m_SamplesOut = outFrame->pts;
 
+    // [SEEKDBG] P0: Track ffmpeg output PTS vs input counter to detect GetBufferedSamples drift
+    {
+      static int seekdbg_filt_counter = 0;
+      if (++seekdbg_filt_counter % 50 == 1)
+        CLog::Log(LOGINFO, "[SEEKDBG] AtempoFilt outPts:{} outNb:{} sIn:{} sOut:{} buffered:{} tempo:{:f}",
+            outFrame->pts, outFrame->nb_samples, m_SamplesIn, m_SamplesOut, GetBufferedSamples(), m_tempo);
+    }
+
     if (m_needConvert)
     {
       av_frame_unref(m_pOutFrame);

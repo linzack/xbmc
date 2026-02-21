@@ -486,6 +486,8 @@ bool CActiveAEBufferPoolAtempo::Create(unsigned int totaltime)
 
 void CActiveAEBufferPoolAtempo::ChangeFilter()
 {
+  // [SEEKDBG] P2: Track filter re-engagement (happens during flush and when tempo changes)
+  CLog::Log(LOGINFO, "[SEEKDBG] AtempoChgFilt tempo:{:f} lastPts:{}", m_tempo, m_lastSamplePts);
   m_pTempoFilter->SetTempo(m_tempo);
   m_changeFilter = false;
 }
@@ -602,6 +604,14 @@ bool CActiveAEBufferPoolAtempo::ProcessBuffers()
 
         // pts of last sample we added to the buffer
         m_lastSamplePts += (int64_t)(in->pkt->nb_samples-in->pkt_start_offset) * 1000 / (int64_t)m_format.m_sampleRate;
+
+        // [SEEKDBG] P1: Track input PTS entering atempo — especially first buffer after seek
+        {
+          static int seekdbg_in_counter = 0;
+          if (++seekdbg_in_counter % 50 == 1)
+            CLog::Log(LOGINFO, "[SEEKDBG] AtempoIn inTS:{} nb:{} lastPts:{}",
+                in->timestamp, in->pkt->nb_samples, m_lastSamplePts);
+        }
       }
 
       // calculate pts for last sample in m_procSample
@@ -615,6 +625,15 @@ bool CActiveAEBufferPoolAtempo::ProcessBuffers()
         if (++log_counter % 50 == 1)
           CLog::Log(LOGDEBUG, "[AtempoFix] Negative bufSamples detected: {}, computed outTS: {}", 
                     bufferedSamples, m_procSample->timestamp);
+      }
+
+      // [SEEKDBG] P1: Track output timestamp computation from atempo ProcessBuffers
+      {
+        static int seekdbg_pb_counter = 0;
+        if (++seekdbg_pb_counter % 50 == 1)
+          CLog::Log(LOGINFO, "[SEEKDBG] AtempoPB lastPts:{} bufSamp:{} outTS:{} sIn:{} sOut:{}",
+              m_lastSamplePts, bufferedSamples, m_procSample->timestamp,
+              m_pTempoFilter->GetSamplesIn(), m_pTempoFilter->GetSamplesOut());
       }
 
       if ((m_drain || m_changeFilter) && m_empty)

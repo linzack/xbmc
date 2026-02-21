@@ -2059,6 +2059,11 @@ bool CActiveAE::RunStages()
         double maxError = ((*it)->m_syncState == CAESyncInfo::SYNC_INSYNC) ? 1000 : 5000;
         double error = playingPts - (*it)->m_pClock->GetClock();
 
+        // [SEEKDBG] P0: Log exact sync error components when error is significant
+        if (fabs(error) > 500)
+          CLog::Log(LOGINFO, "[SEEKDBG] SyncChk bufTS:{} pktOff:{} pts:{:f} delay:{:f} playPts:{:f} clock:{:f} err:{:f}",
+              buf->timestamp, buf->pkt_start_offset, pts, delay, playingPts, (*it)->m_pClock->GetClock(), error);
+
         // underestimate error for TrueHD passthrough
         // oscillations should be less than frametime 40ms to avoid unnecessary a/v sync corrections
         if (isTrueHDPassthrough)
@@ -2552,6 +2557,8 @@ CSampleBuffer* CActiveAE::SyncStream(CActiveAEStream *stream)
   }
   else if (stream->m_syncState == CAESyncInfo::AESyncState::SYNC_ADJUST)
   {
+    // [SEEKDBG] P2: Log SyncStream ADJUST state with actual error value
+    CLog::Log(LOGINFO, "[SEEKDBG] SyncAdj err:{:f} lastErr:{:f}", error, stream->m_lastSyncError);
     if (error > 0)
     {
       ret = m_silenceBuffers->GetFreeBuffer();
