@@ -499,6 +499,36 @@ bool CActiveAEBufferPoolAtempo::ProcessBuffers()
     {
       in = m_inputSamples.front();
       m_inputSamples.pop_front();
+      // Log BEFORE modification
+      {
+        static int atempo_byp_counter = 0;
+        if (++atempo_byp_counter % 50 == 1)
+          CLog::Log(LOGINFO, "[AtempoBypass] Pre-Sync - inTS:{} m_lastSamplePts:{}", 
+                    in->timestamp, m_lastSamplePts);
+      }
+
+      // 1. Trust incoming demuxer timestamps for syncs/seeks, else calculate continuity
+      if (in->timestamp)
+      {
+        m_lastSamplePts = in->timestamp;
+      }
+      else
+      {
+        in->pkt_start_offset = 0;
+        // 2. Guarantee the buffer has a continuous timestamp IF ONE WAS MISSING
+        in->timestamp = m_lastSamplePts;
+      }
+
+      // 3. Advance the timeline for the next potential 0-timestamp buffer
+      m_lastSamplePts += (in->pkt->nb_samples - in->pkt_start_offset) * 1000 / m_format.m_sampleRate;
+
+      // Log AFTER modification
+      {
+        static int atempo_byp_counter2 = 0;
+        if (++atempo_byp_counter2 % 50 == 1)
+          CLog::Log(LOGINFO, "[AtempoBypass] Post-Sync - outTS:{} nextPts:{} nb:{} offset:{} rate:{}", 
+                    in->timestamp, m_lastSamplePts, in->pkt->nb_samples, in->pkt_start_offset, m_format.m_sampleRate);
+      }
       m_outputSamples.push_back(in);
       busy = true;
     }

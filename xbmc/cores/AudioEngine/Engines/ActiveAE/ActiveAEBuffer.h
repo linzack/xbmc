@@ -145,7 +145,7 @@ protected:
   bool m_drain;
   bool m_changeFilter;
   float m_tempo;
-  int64_t m_lastSamplePts;
+  int64_t m_lastSamplePts = 0;
   bool m_fillPackets;
 };
 
