@@ -298,13 +298,21 @@ bool CActiveAEBufferPoolResample::ResampleBuffers(int64_t timestamp)
 
         // pts of last sample we added to the buffer
         m_lastSamplePts +=
-            (in->pkt->nb_samples - in->pkt_start_offset) * 1000 / in->pkt->config.sample_rate;
+            (int64_t)(in->pkt->nb_samples - in->pkt_start_offset) * 1000 / (int64_t)in->pkt->config.sample_rate;
       }
 
       // calculate pts for last sample in m_procSample
       int bufferedSamples = m_resampler->GetBufferedSamples();
       m_procSample->pkt_start_offset = m_procSample->pkt->nb_samples;
-      m_procSample->timestamp = m_lastSamplePts - bufferedSamples * 1000 / m_format.m_sampleRate;
+      m_procSample->timestamp = m_lastSamplePts - (int64_t)bufferedSamples * 1000 / (int64_t)m_format.m_sampleRate;
+
+      if (bufferedSamples < 0)
+      {
+        static int log_counter = 0;
+        if (++log_counter % 50 == 1)
+          CLog::Log(LOGDEBUG, "[ResampleFix] Negative bufSamples detected: {}, computed outTS: {}", 
+                    bufferedSamples, m_procSample->timestamp);
+      }
 
       if ((m_drain || m_changeResampler) && m_empty)
       {
@@ -520,7 +528,7 @@ bool CActiveAEBufferPoolAtempo::ProcessBuffers()
       }
 
       // 3. Advance the timeline for the next potential 0-timestamp buffer
-      m_lastSamplePts += (in->pkt->nb_samples - in->pkt_start_offset) * 1000 / m_format.m_sampleRate;
+      m_lastSamplePts += (int64_t)(in->pkt->nb_samples - in->pkt_start_offset) * 1000 / (int64_t)m_format.m_sampleRate;
 
       // Log AFTER modification
       {
@@ -593,13 +601,21 @@ bool CActiveAEBufferPoolAtempo::ProcessBuffers()
           in->pkt_start_offset = 0;
 
         // pts of last sample we added to the buffer
-        m_lastSamplePts += (in->pkt->nb_samples-in->pkt_start_offset) * 1000 / m_format.m_sampleRate;
+        m_lastSamplePts += (int64_t)(in->pkt->nb_samples-in->pkt_start_offset) * 1000 / (int64_t)m_format.m_sampleRate;
       }
 
       // calculate pts for last sample in m_procSample
       int bufferedSamples = m_pTempoFilter->GetBufferedSamples();
       m_procSample->pkt_start_offset = m_procSample->pkt->nb_samples;
-      m_procSample->timestamp = m_lastSamplePts - bufferedSamples * 1000 / m_format.m_sampleRate;
+      m_procSample->timestamp = m_lastSamplePts - (int64_t)bufferedSamples * 1000 / (int64_t)m_format.m_sampleRate;
+
+      if (bufferedSamples < 0)
+      {
+        static int log_counter = 0;
+        if (++log_counter % 50 == 1)
+          CLog::Log(LOGDEBUG, "[AtempoFix] Negative bufSamples detected: {}, computed outTS: {}", 
+                    bufferedSamples, m_procSample->timestamp);
+      }
 
       if ((m_drain || m_changeFilter) && m_empty)
       {
