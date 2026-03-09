@@ -174,11 +174,27 @@ void CActiveAEStream::RemapBuffer()
 
 double CActiveAEStream::CalcResampleRatio(double error)
 {
+  constexpr double MAX_RESAMPLE_INTEGRAL = 0.01;
+
   //reset the integral on big errors, failsafe
   if (fabs(error) > 1000)
     m_resampleIntegral = 0;
   else if (fabs(error) > 5)
     m_resampleIntegral += error / 1000 / 50;
+
+  // clamp to [-MAX_RESAMPLE_INTEGRAL, MAX_RESAMPLE_INTEGRAL] to prevent integral windup during long drift periods
+  if (m_resampleIntegral > MAX_RESAMPLE_INTEGRAL)
+  {
+    CLog::LogF(LOGDEBUG, "[SYNC_WINDUP] Clamping positive integral windup: {:f} -> {:f}",
+               m_resampleIntegral, MAX_RESAMPLE_INTEGRAL);
+    m_resampleIntegral = MAX_RESAMPLE_INTEGRAL;
+  }
+  else if (m_resampleIntegral < -MAX_RESAMPLE_INTEGRAL)
+  {
+    CLog::LogF(LOGDEBUG, "[SYNC_WINDUP] Clamping negative integral windup: {:f} -> {:f}",
+               m_resampleIntegral, -MAX_RESAMPLE_INTEGRAL);
+    m_resampleIntegral = -MAX_RESAMPLE_INTEGRAL;
+  }
 
   double proportional = 0.0;
 
@@ -195,8 +211,9 @@ double CActiveAEStream::CalcResampleRatio(double error)
   }
 
   double ret = 1.0 / clockspeed + proportional + m_resampleIntegral;
-  //CLog::Log(LOGINFO,"----- error: {:f}, rr: {:f}, prop: {:f}, int: {:f}",
-  //                    error, ret, proportional, m_resampleIntegral);
+  CLog::LogF(LOGDEBUG,
+             "[SYNC_WINDUP] err:{:f} prop:{:f} int:{:f} clkSpd:{:f} mClkSpd:{:f} -> RR:{:f}",
+             error, proportional, m_resampleIntegral, clockspeed, m_clockSpeed, ret);
   return ret;
 }
 
