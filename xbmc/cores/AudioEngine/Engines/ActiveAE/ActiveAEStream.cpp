@@ -221,8 +221,18 @@ std::chrono::milliseconds CActiveAEStream::GetErrorInterval()
 {
   std::chrono::milliseconds ret = m_errorInterval;
   double rr = m_processingBuffers->GetRR();
-  if (rr > 1.02 || rr < 0.98)
+
+  // Atempo time-stretches without pitch-shifting, rendering it immune to audible
+  // wow-and-flutter. It requires tight 1-second feedback loops to prevent PID
+  // overshoots when heavily catching up (e.g. 2.0x bounds).
+  bool isAtempo = m_processingBuffers && m_processingBuffers->IsAtempoActive();
+
+  if (!isAtempo && (rr > 1.02 || rr < 0.98))
     ret *= 3;
+
+  if (isAtempo && (rr > 1.02 || rr < 0.98))
+    CLog::LogF(LOGDEBUG, "[AtempoFix] Bypassed wow-and-flutter 3x interval multiplier for Atempo. RR:{:f}", rr);
+
   return ret;
 }
 
