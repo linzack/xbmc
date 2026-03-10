@@ -2481,6 +2481,43 @@ CSampleBuffer* CActiveAE::SyncStream(CActiveAEStream *stream)
                                           : stream->GetErrorInterval();
   bool newerror = stream->m_syncError.Get(error, timeout);
 
+  if (newerror && stream->m_syncState == CAESyncInfo::AESyncState::SYNC_INSYNC)
+  {
+    // When atempo is active at high tempo, large errors can't be recovered
+    // through the PID+Atempo path because the Atempo filter's 2.0x speed
+    // ceiling limits the effective catch-up rate to (2.0 - baseTempo)x.
+    // At 1.6x tempo, that's only 0.4x realtime — too slow for errors >500ms.
+    // Additionally, the 1-second PID update interval causes "Interval Stagnation"
+    // where the error grows further (clock outruns audio) before first correction.
+    // Route these cases to SYNC_ADJUST (buffer drop/insert) instead of PID.
+
+    constexpr double MAX_ATEMPO_RECOVERY_SECS = 2.0;
+
+    double clockSpeed = stream->m_pClock ? stream->m_pClock->GetClockSpeed() : 1.0;
+    double atempoMaxCatchup = 2.0 - clockSpeed; // 2.0 = max tempo, see SetTempo()
+
+    // If recovery would exceed MAX_ATEMPO_RECOVERY_SECS at max Atempo speed,
+    // use SyncAdj instead. At 1.0x tempo, atempoMaxCatchup=1.0, so the
+    // threshold requires 2000ms error — naturally protecting normal playback.
+    bool wouldBeSlowRecovery =
+        atempoMaxCatchup > 0.0 &&
+        (fabs(error) / (atempoMaxCatchup * 1000.0) > MAX_ATEMPO_RECOVERY_SECS);
+
+    if (wouldBeSlowRecovery && fabs(error) > threshold)
+    {
+      stream->m_syncState = CAESyncInfo::AESyncState::SYNC_ADJUST;
+      stream->m_processingBuffers->SetRR(1.0, m_settings.atempoThreshold);
+      stream->m_resampleIntegral = 0;
+      stream->m_lastSyncError = error; // existing member
+      CLog::LogF(LOGDEBUG,
+                 "error {:f} would take >{:.1f}s to recover via Atempo at {:.1f}x "
+                 "tempo (max catchup: {:.2f}x), using SyncAdj instead",
+                 error, fabs(error) / (atempoMaxCatchup * 1000.0), clockSpeed,
+                 atempoMaxCatchup);
+      // Fall through to SYNC_ADJUST handling below
+    }
+  }
+
   if (newerror && fabs(error) > threshold && stream->m_syncState == CAESyncInfo::AESyncState::SYNC_INSYNC)
   {
     stream->m_syncState = CAESyncInfo::AESyncState::SYNC_ADJUST;
