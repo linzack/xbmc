@@ -478,6 +478,7 @@ bool CActiveAEBufferPoolAtempo::Create(unsigned int totaltime)
 
 void CActiveAEBufferPoolAtempo::ChangeFilter()
 {
+  CLog::Log(LOGDEBUG, "[SEEKDBG2] CActiveAEBufferPoolAtempo::ChangeFilter - Tempo changing to: {}, lastPts: {}", m_tempo, m_lastSamplePts);
   m_pTempoFilter->SetTempo(m_tempo);
   m_changeFilter = false;
 }
@@ -562,6 +563,10 @@ bool CActiveAEBufferPoolAtempo::ProcessBuffers()
         else
           in->pkt_start_offset = 0;
 
+        static int in_cnt = 0;
+        if (++in_cnt % 50 == 1)
+          CLog::Log(LOGDEBUG, "[SEEKDBG2] CActiveAEBufferPoolAtempo::ProcessBuffers - input ATS: {}, samples: {}", in->timestamp, in->pkt->nb_samples);
+
         // pts of last sample we added to the buffer
         m_lastSamplePts += (in->pkt->nb_samples-in->pkt_start_offset) * 1000 / m_format.m_sampleRate;
       }
@@ -570,6 +575,10 @@ bool CActiveAEBufferPoolAtempo::ProcessBuffers()
       int bufferedSamples = m_pTempoFilter->GetBufferedSamples();
       m_procSample->pkt_start_offset = m_procSample->pkt->nb_samples;
       m_procSample->timestamp = m_lastSamplePts - bufferedSamples * 1000 / m_format.m_sampleRate;
+
+      static int out_cnt = 0;
+      if (++out_cnt % 50 == 1)
+        CLog::Log(LOGDEBUG, "[SEEKDBG2] CActiveAEBufferPoolAtempo::ProcessBuffers - output ATS computed: {}, bufSamples: {}", m_procSample->timestamp, bufferedSamples);
 
       if ((m_drain || m_changeFilter) && m_empty)
       {

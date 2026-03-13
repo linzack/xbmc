@@ -955,6 +955,7 @@ void CActiveAE::StateMachine(int signal, Protocol *port, Message *msg)
           return;
         case CActiveAEControlProtocol::FLUSHSTREAM:
           stream = *(CActiveAEStream**)msg->data;
+          CLog::Log(LOGDEBUG, "[SEEKDBG2] CActiveAE::StateMachine - AE_TOP_CONFIGURED_IDLE FLUSHSTREAM received for stream {}", stream->m_id);
           SFlushStream(stream);
           msg->Reply(CActiveAEControlProtocol::ACC);
           m_state = AE_TOP_CONFIGURED_PLAY;
@@ -2064,6 +2065,11 @@ bool CActiveAE::RunStages()
         if (isTrueHDPassthrough)
           error *= 0.45;
 
+        // [SEEKDBG2] P0: Log exact sync error components when error is significant
+        if (fabs(error) > 500)
+          CLog::Log(LOGINFO, "[SEEKDBG2] SyncChk bufTS:{} pktOff:{} pts:{} delay:{} playPts:{} clock:{} err:{}",
+              buf->timestamp, buf->pkt_start_offset, pts, delay, playingPts, (*it)->m_pClock->GetClock(), error);
+
         if (error > maxError)
         {
           CLog::Log(LOGWARNING, "ActiveAE - large audio sync error: {:f}", error);
@@ -2487,7 +2493,7 @@ CSampleBuffer* CActiveAE::SyncStream(CActiveAEStream *stream)
     stream->m_processingBuffers->SetRR(1.0, m_settings.atempoThreshold);
     stream->m_resampleIntegral = 0;
     stream->m_lastSyncError = error;
-    CLog::Log(LOGDEBUG, "ActiveAE::SyncStream - average error {:f} above threshold of {:f}", error,
+    CLog::Log(LOGDEBUG, "[SEEKDBG2] ActiveAE::SyncStream - average error {} above threshold of {}", error,
               threshold);
   }
   else if (newerror && stream->m_syncState == CAESyncInfo::AESyncState::SYNC_MUTE)
@@ -2515,6 +2521,9 @@ CSampleBuffer* CActiveAE::SyncStream(CActiveAEStream *stream)
   }
   else if (stream->m_syncState == CAESyncInfo::AESyncState::SYNC_ADJUST)
   {
+    static int syncadj_cnt = 0;
+    if (++syncadj_cnt % 10 == 1)
+      CLog::Log(LOGDEBUG, "[SEEKDBG2] ActiveAE::SyncStream - SYNC_ADJUST err:{} lastErr:{}", error, stream->m_lastSyncError);
     if (error > 0)
     {
       ret = m_silenceBuffers->GetFreeBuffer();
@@ -3489,6 +3498,7 @@ bool CActiveAE::FreeStream(IAEStream *stream, bool finish)
 
 void CActiveAE::FlushStream(CActiveAEStream *stream)
 {
+  CLog::Log(LOGDEBUG, "[SEEKDBG2] CActiveAE::FlushStream - Flush requested for stream");
   Message *reply;
   if (m_controlPort.SendOutMessageSync(CActiveAEControlProtocol::FLUSHSTREAM, &reply, 1s, &stream,
                                        sizeof(CActiveAEStream*)))

@@ -222,6 +222,10 @@ int CActiveAEFilter::ProcessFilter(uint8_t **dst_buffer, int dst_samples, uint8_
 
     m_SamplesIn += src_samples;
 
+    static int ffmpeg_in_cnt = 0;
+    if (++ffmpeg_in_cnt % 50 == 1)
+      CLog::Log(LOGDEBUG, "[SEEKDBG2] CActiveAEFilter::ProcessFilter - ffmpeg inSamples: {}, m_SamplesIn: {}, buffered: {}", src_samples, m_SamplesIn, GetBufferedSamples());
+
     result = avcodec_fill_audio_frame(frame, channels, m_sampleFormat,
                              src_buffer[0], src_bufsize, 16);
     if (result < 0)
