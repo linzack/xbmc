@@ -1311,6 +1311,9 @@ bool CDVDDemuxFFmpeg::SeekTime(double time, bool backwards, double* startpts)
   if (ret >= 0)
   {
     XbmcThreads::EndTime<> timer(1000ms);
+    double first_audio_pts = DVD_NOPTS_VALUE;
+    double first_video_pts = DVD_NOPTS_VALUE;
+
     while (m_currentPts == DVD_NOPTS_VALUE && !timer.IsTimePast())
     {
       m_pkt.result = -1;
@@ -1322,8 +1325,21 @@ bool CDVDDemuxFFmpeg::SeekTime(double time, bool backwards, double* startpts)
         KODI::TIME::Sleep(10ms);
         continue;
       }
+
+      if (m_pkt.result == 0)
+      {
+        auto st = m_pFormatContext->streams[m_pkt.pkt.stream_index];
+        if (st->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && first_audio_pts == DVD_NOPTS_VALUE)
+          first_audio_pts = ConvertTimestamp(m_pkt.pkt.dts != AV_NOPTS_VALUE ? m_pkt.pkt.dts : m_pkt.pkt.pts, st->time_base.den, st->time_base.num);
+        else if (st->codecpar->codec_type == AVMEDIA_TYPE_VIDEO && first_video_pts == DVD_NOPTS_VALUE)
+          first_video_pts = ConvertTimestamp(m_pkt.pkt.dts != AV_NOPTS_VALUE ? m_pkt.pkt.dts : m_pkt.pkt.pts, st->time_base.den, st->time_base.num);
+      }
+
       CDVDDemuxUtils::FreeDemuxPacket(pkt);
     }
+
+    CLog::Log(LOGDEBUG, "[SEEKDBG2] CDVDDemuxFFmpeg::SeekTime - First demuxed audio PTS: {}, First demuxed video PTS: {}, Requested start: {}", 
+              first_audio_pts, first_video_pts, time);
   }
 
   if (m_currentPts == DVD_NOPTS_VALUE)

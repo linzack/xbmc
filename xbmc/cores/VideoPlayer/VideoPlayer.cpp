@@ -2399,6 +2399,10 @@ bool CVideoPlayer::CheckPlayerInit(CCurrentStream& current)
 
   if (current.dts != DVD_NOPTS_VALUE)
   {
+    CLog::Log(LOGDEBUG, "[SEEKDBG2] CVideoPlayer::CheckPlayerInit - [{}] inited. startpts: {}, dts: {}, gap: {}", 
+              current.type == StreamType::AUDIO ? "Audio" : "Video", 
+              current.startpts, current.dts, current.dts - current.startpts);
+
     current.inited = true;
     current.startpts = current.dts;
   }
@@ -4271,8 +4275,10 @@ void CVideoPlayer::FlushBuffers(double pts, bool accurate, bool sync)
     }
   }
 
-  if(pts != DVD_NOPTS_VALUE && sync)
+  if(pts != DVD_NOPTS_VALUE && sync) {
+    CLog::Log(LOGDEBUG, "[SEEKDBG2] CVideoPlayer::FlushBuffers - Setting clock and stream startpts to: {}", pts);
     m_clock.Discontinuity(pts);
+  }
   UpdatePlayState(0);
 
   m_demuxerSpeed = DVD_PLAYSPEED_NORMAL;

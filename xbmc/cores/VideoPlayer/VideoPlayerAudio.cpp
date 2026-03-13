@@ -574,6 +574,10 @@ bool CVideoPlayerAudio::ProcessDecoderOutput(DVDAudioFrame &audioframe)
       msg.cachetotal = m_audioSink.GetMaxDelay() * DVD_TIME_BASE;
       msg.cachetime = m_audioSink.GetDelay();
       msg.timestamp = audioframe.hasTimestamp ? audioframe.pts : DVD_NOPTS_VALUE;
+
+      CLog::Log(LOGDEBUG, "[SEEKDBG2] CVideoPlayerAudio::ProcessDecoderOutput - PLAYER_STARTED. Sending cachetime: {}, timestamp: {}", 
+                msg.cachetime, msg.timestamp);
+
       m_messageParent.Put(std::make_shared<CDVDMsgType<SStartMsg>>(CDVDMsg::PLAYER_STARTED, msg));
 
       m_streaminfo.channels = audioframe.format.m_channelLayout.Count();
