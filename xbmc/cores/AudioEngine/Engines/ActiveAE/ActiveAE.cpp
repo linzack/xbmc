@@ -1582,6 +1582,7 @@ void CActiveAE::SFlushStream(CActiveAEStream *stream)
 
 void CActiveAE::FlushEngine()
 {
+  CLog::Log(LOGDEBUG, "[SEEKDBG2] CActiveAE::FlushEngine - Flushing internal buffers and states.");
   if (m_sinkBuffers)
     m_sinkBuffers->Flush();
   if (m_vizBuffers)
