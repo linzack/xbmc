@@ -2162,6 +2162,29 @@ void CVideoPlayer::HandlePlaySpeed()
                  (m_CurrentAudio.packets == 0 && m_CurrentVideo.packets > threshold) ||
                  (!m_VideoPlayerVideo->AcceptsData() && m_VideoPlayerAudio->GetLevel() < 10);
 
+    // [SEEKDBG2] NEW: Branch evaluation logging
+    static bool loggedSyncDecision = false;
+    if ((m_CurrentVideo.syncState == IDVDStreamPlayer::SYNC_WAITSYNC) ||
+        (m_CurrentAudio.syncState == IDVDStreamPlayer::SYNC_WAITSYNC))
+    {
+      if (!loggedSyncDecision)
+      {
+        CLog::Log(LOGDEBUG, "[SEEKDBG2] CVideoPlayer::HandlePlaySpeed - Evaluating Sync Logic.");
+        CLog::Log(LOGDEBUG, "[SEEKDBG2]   Audio WAITSYNC: {}, AV_SYNC: {}, packets: {}, acceptsData: {}",
+                  (m_CurrentAudio.syncState == IDVDStreamPlayer::SYNC_WAITSYNC),
+                  m_CurrentAudio.avsync, m_CurrentAudio.packets, m_VideoPlayerAudio->AcceptsData());
+        CLog::Log(LOGDEBUG, "[SEEKDBG2]   Video WAITSYNC: {}, AV_SYNC: {}, packets: {}, acceptsData: {}",
+                  (m_CurrentVideo.syncState == IDVDStreamPlayer::SYNC_WAITSYNC),
+                  m_CurrentVideo.avsync, m_CurrentVideo.packets, m_VideoPlayerVideo->AcceptsData());
+        CLog::Log(LOGDEBUG, "[SEEKDBG2]   Branch Logic Eval - video: {}, audio: {}", video, audio);
+        loggedSyncDecision = true;
+      }
+    }
+    else
+    {
+      loggedSyncDecision = false;
+    }
+
     if (m_CurrentAudio.syncState == IDVDStreamPlayer::SYNC_WAITSYNC &&
         (m_CurrentAudio.avsync == CCurrentStream::AV_SYNC_CONT ||
          m_CurrentVideo.syncState == IDVDStreamPlayer::SYNC_INSYNC))
@@ -2399,9 +2422,13 @@ bool CVideoPlayer::CheckPlayerInit(CCurrentStream& current)
 
   if (current.dts != DVD_NOPTS_VALUE)
   {
+    const char* typeStr = "Unknown";
+    if (current.type == StreamType::AUDIO) typeStr = "Audio";
+    else if (current.type == StreamType::VIDEO) typeStr = "Video";
+    else if (current.type == StreamType::SUBTITLE) typeStr = "Subtitle";
+
     CLog::Log(LOGDEBUG, "[SEEKDBG2] CVideoPlayer::CheckPlayerInit - [{}] inited. startpts: {}, dts: {}, gap: {}", 
-              current.type == StreamType::AUDIO ? "Audio" : "Video", 
-              current.startpts, current.dts, current.dts - current.startpts);
+              typeStr, current.startpts, current.dts, current.dts - current.startpts);
 
     current.inited = true;
     current.startpts = current.dts;
