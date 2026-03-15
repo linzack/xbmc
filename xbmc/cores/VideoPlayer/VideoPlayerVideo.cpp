@@ -556,6 +556,9 @@ void CVideoPlayerVideo::Process()
       {
         bRequestDrop = true;
       }
+
+      if (m_syncState != IDVDStreamPlayer::SYNC_INSYNC)
+        CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayerVideo::Process - bRequestDrop: {}, iDropDirective: 0x{:x}, syncState: {}", (int)bRequestDrop, (int)iDropDirective, (int)m_syncState);
       if (iDropDirective & DROP_DROPPED)
       {
         m_iDroppedFrames++;
@@ -611,6 +614,9 @@ void CVideoPlayerVideo::Process()
 bool CVideoPlayerVideo::ProcessDecoderOutput(double &frametime, double &pts)
 {
   CDVDVideoCodec::VCReturn decoderState = m_pVideoCodec->GetPicture(&m_picture);
+
+  if (m_syncState != IDVDStreamPlayer::SYNC_INSYNC)
+    CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayerVideo::ProcessDecoderOutput - decoderState: {}, pts: {:.3f}", (int)decoderState, m_picture.pts);
 
   if (decoderState == CDVDVideoCodec::VC_BUFFER)
   {
@@ -746,6 +752,11 @@ bool CVideoPlayerVideo::ProcessDecoderOutput(double &frametime, double &pts)
       pts += m_picture.iDuration * m_speed / abs(m_speed);
 
     m_outputSate = OutputPicture(&m_picture);
+
+    if (m_syncState != IDVDStreamPlayer::SYNC_INSYNC)
+      CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayerVideo::ProcessDecoderOutput - OutputPicture returned: {}, flags: 0x{:x}, pts: {:.3f}", (int)m_outputSate, m_picture.iFlags, m_picture.pts);
+    if (m_syncState != IDVDStreamPlayer::SYNC_INSYNC && m_outputSate == OUTPUT_AGAIN)
+      CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayerVideo::ProcessDecoderOutput - OUTPUT_AGAIN loop, pts: {:.3f}", m_picture.pts);
 
     if (m_outputSate == OUTPUT_AGAIN)
     {
@@ -928,6 +939,10 @@ CVideoPlayerVideo::EOutputState CVideoPlayerVideo::OutputPicture(const VideoPict
   // don't wait when going ff
   if (m_speed > DVD_PLAYSPEED_NORMAL)
     maxWaitTime = std::max(timeToDisplay, 0ms);
+
+  if (m_syncState != IDVDStreamPlayer::SYNC_INSYNC)
+    CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayerVideo::OutputPicture PRE-WAIT - PTS: {:.0f}, clock: {:.0f}, timeToDisplay: {}ms, maxWait: {}ms, speed: {}", pPicture->pts, iPlayingClock, (int)DVD_TIME_TO_MSEC(pPicture->pts - iPlayingClock), (int)maxWaitTime.count(), m_speed);
+
   int buffer = m_renderManager.WaitForBuffer(m_bAbortOutput, maxWaitTime);
   if (buffer < 0)
   {
@@ -1162,6 +1177,9 @@ int CVideoPlayerVideo::CalcDropRequirement(double pts)
   {
     result |= DROP_VERYLATE;
   }
+  if (m_syncState != IDVDStreamPlayer::SYNC_INSYNC)
+    CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayerVideo::CalcDropRequirement - allowDrop: {}, result: 0x{:x}, lateness: {}, pts: {:.3f}", (int)m_bAllowDrop, (int)result, lateness, pts);
+
   return result;
 }
 

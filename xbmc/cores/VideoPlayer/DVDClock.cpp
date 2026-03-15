@@ -124,6 +124,7 @@ void CDVDClock::Advance(double time)
 
 void CDVDClock::SetSpeed(int iSpeed)
 {
+  CLog::Log(LOGDEBUG, "[SEEKTRACE] CDVDClock::SetSpeed - Speed: {}, Clock: {:.3f}", iSpeed, GetClock());
   // this will sometimes be a little bit of due to rounding errors, ie clock might jump a bit when changing speed
   std::unique_lock lock(m_critSection);
 

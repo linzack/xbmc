@@ -2052,6 +2052,9 @@ void CVideoPlayer::HandlePlaySpeed()
   }
 
   if (m_caching == CACHESTATE_INIT)
+    CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayer::HandlePlaySpeed - Eval Sync: V_Sync: {}, A_Sync: {}, TimerExp: {}", (int)m_CurrentVideo.syncState, (int)m_CurrentAudio.syncState, (int)m_cachingTimer.IsTimePast());
+
+  if (m_caching == CACHESTATE_INIT)
   {
     // if all enabled streams have been inited we are done
     if ((m_CurrentVideo.id >= 0 || m_CurrentAudio.id >= 0) &&
@@ -3290,6 +3293,7 @@ void CVideoPlayer::HandleMessages()
         m_CurrentVideo.cachetotal = msg.cachetotal;
         m_CurrentVideo.starttime = msg.timestamp;
       }
+      CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayer::HandleMessages - Received PLAYER_STARTED from player: {}, VideoSync: {}, AudioSync: {}", (int)msg.player, (int)m_CurrentVideo.syncState, (int)m_CurrentAudio.syncState);
       CLog::Log(LOGDEBUG, "CVideoPlayer::HandleMessages - player started {}", msg.player);
     }
     else if (pMsg->IsType(CDVDMsg::PLAYER_REPORT_STATE))
@@ -3354,6 +3358,7 @@ void CVideoPlayer::SetCaching(ECacheState state)
   if(m_caching == state)
     return;
 
+  CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayer::SetCaching - State: {}, Clock: {:.3f}, Speed: {}, Tempo: {:.2f}", (int)state, m_clock.GetClock(), m_playSpeed, m_processInfo->GetTempo());
   CLog::Log(LOGDEBUG, "CVideoPlayer::SetCaching - caching state {}", state);
   if (state == CACHESTATE_FULL ||
       state == CACHESTATE_INIT)
@@ -3689,6 +3694,7 @@ void CVideoPlayer::LoadPage(int p, int sp, unsigned char* buffer)
 
 void CVideoPlayer::SeekTime(int64_t iTime)
 {
+  CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayer::SeekTime - Enter: {}", iTime);
   int64_t seekOffset = iTime - GetTime();
 
   CDVDMsgPlayerSeek::CMode mode;
@@ -4222,6 +4228,7 @@ bool CVideoPlayer::CloseStream(CCurrentStream& current, bool bWaitForBuffers)
 
 void CVideoPlayer::FlushBuffers(double pts, bool accurate, bool sync)
 {
+  CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayer::FlushBuffers - Enter: {:.3f}, Clock: {:.3f}", pts, m_clock.GetClock());
   CLog::Log(LOGDEBUG, "CVideoPlayer::FlushBuffers - flushing buffers");
 
   double startpts;

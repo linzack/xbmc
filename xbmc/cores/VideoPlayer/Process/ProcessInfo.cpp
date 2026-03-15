@@ -580,6 +580,12 @@ float CProcessInfo::GetNewTempo()
   return m_newTempo;
 }
 
+float CProcessInfo::GetTempo()
+{
+  std::unique_lock lock(m_stateSection);
+  return m_tempo;
+}
+
 float CProcessInfo::MinTempoPlatform()
 {
   return 0.75f;
