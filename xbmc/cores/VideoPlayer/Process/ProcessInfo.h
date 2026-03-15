@@ -100,6 +100,7 @@ public:
   void SetTempo(float tempo);
   void SetNewTempo(float tempo);
   float GetNewTempo();
+  float GetTempo();
   bool IsTempoAllowed(float tempo);
   virtual float MinTempoPlatform();
   virtual float MaxTempoPlatform();
