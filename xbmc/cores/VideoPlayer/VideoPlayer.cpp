@@ -3279,6 +3279,37 @@ void CVideoPlayer::HandleMessages()
     else if (pMsg->IsType(CDVDMsg::PLAYER_STARTED))
     {
       SStartMsg& msg = std::static_pointer_cast<CDVDMsgType<SStartMsg>>(pMsg)->m_value;
+      if (msg.timestamp != DVD_NOPTS_VALUE)
+      {
+        // Strictly use clock to avoid startpts race condition.
+        double reference{m_clock.GetClock()};
+
+        if (reference != DVD_NOPTS_VALUE &&
+            msg.timestamp < reference - DVD_SEC_TO_TIME(IDVDStreamPlayer::SYNC_STALE_RELAXED_SEC))
+        {
+          if (msg.timestamp <
+              reference - DVD_SEC_TO_TIME(IDVDStreamPlayer::SYNC_STALE_THRESHOLD_SEC))
+          {
+            CLog::LogF(LOGDEBUG,
+                       "[SEEKTRACE] IGNORED stale starttime: {:.3f} (ref: {:.3f}). "
+                       "Clock will stay at current anchor.",
+                       msg.timestamp, reference);
+
+            // Suppress ONLY the starttime update to prevent clock reversion.
+            msg.timestamp = DVD_NOPTS_VALUE;
+          }
+          else
+          {
+            CLog::LogF(LOGDEBUG, "[SEEKTRACE] ACCEPTED (RELAXED) starttime: {:.3f} (ref: {:.3f})",
+                       msg.timestamp, reference);
+          }
+        }
+        else
+        {
+          CLog::LogF(LOGDEBUG, "[SEEKTRACE] ACCEPTED starttime: {:.3f} (ref: {:.3f})",
+                     msg.timestamp, reference);
+        }
+      }
       if (msg.player == VideoPlayer_AUDIO)
       {
         m_CurrentAudio.syncState = IDVDStreamPlayer::SYNC_WAITSYNC;

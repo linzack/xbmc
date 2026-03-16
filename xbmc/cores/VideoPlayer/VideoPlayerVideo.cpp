@@ -747,6 +747,37 @@ bool CVideoPlayerVideo::ProcessDecoderOutput(double &frametime, double &pts)
     }
 
     m_picture.pts = pts + extraDelay;
+
+    // Proactive Source Filtering
+    if (m_syncState != IDVDStreamPlayer::SYNC_INSYNC && m_picture.pts != DVD_NOPTS_VALUE)
+    {
+      double clock{m_pClock->GetClock()};
+      CLog::LogF(LOGDEBUG, "[SEEKTRACE] Pre-check. PTS: {:.3f}, Clock: {:.3f}", m_picture.pts,
+                 clock);
+
+      if (clock != DVD_NOPTS_VALUE &&
+          m_picture.pts < clock - DVD_SEC_TO_TIME(IDVDStreamPlayer::SYNC_STALE_RELAXED_SEC))
+      {
+        if (m_picture.pts < clock - DVD_SEC_TO_TIME(IDVDStreamPlayer::SYNC_STALE_THRESHOLD_SEC))
+        {
+          CLog::LogF(LOGDEBUG, "[SEEKTRACE] STALE frame dropped. PTS: {:.3f} < Clock: {:.3f}",
+                     m_picture.pts, clock);
+
+          // Properly release the stale buffer
+          if (m_picture.videoBuffer)
+          {
+            m_picture.videoBuffer->Release();
+            m_picture.videoBuffer = nullptr;
+          }
+          return true; // Request priority-only processing then continue decoding next frame
+        }
+        else
+        {
+          CLog::LogF(LOGDEBUG, "[SEEKTRACE] ACCEPTED (RELAXED) frame. PTS: {:.3f}, Clock: {:.3f}",
+                     m_picture.pts, clock);
+        }
+      }
+    }
     // guess next frame pts. iDuration is always valid
     if (m_speed != 0)
       pts += m_picture.iDuration * m_speed / abs(m_speed);
@@ -932,13 +963,36 @@ CVideoPlayerVideo::EOutputState CVideoPlayerVideo::OutputPicture(const VideoPict
     return OUTPUT_DROPPED;
   }
 
-  auto timeToDisplay = std::chrono::milliseconds(DVD_TIME_TO_MSEC(pPicture->pts - iPlayingClock));
+  auto timeToDisplayMedia{
+      std::chrono::milliseconds(DVD_TIME_TO_MSEC(pPicture->pts - iPlayingClock))};
+  float tempo{m_processInfo.GetTempo()};
+  auto timeToDisplay =
+      (tempo > IDVDStreamPlayer::TEMPO_THRESHOLD && timeToDisplayMedia.count() > 0)
+          ? std::chrono::milliseconds(
+                static_cast<int64_t>(timeToDisplayMedia.count() / tempo))
+          : timeToDisplayMedia;
+
+  if (tempo > IDVDStreamPlayer::TEMPO_THRESHOLD && m_syncState != IDVDStreamPlayer::SYNC_INSYNC)
+  {
+    CLog::LogF(LOGDEBUG, "[SEEKTRACE] Wait Scaled. Media: {}ms, Real: {}ms, Tempo: {:.2f}",
+               static_cast<int>(timeToDisplayMedia.count()),
+               static_cast<int>(timeToDisplay.count()), tempo);
+  }
 
   // make sure waiting time is not negative
   std::chrono::milliseconds maxWaitTime = std::min(std::max(timeToDisplay + 500ms, 50ms), 500ms);
   // don't wait when going ff
   if (m_speed > DVD_PLAYSPEED_NORMAL)
     maxWaitTime = std::max(timeToDisplay, 0ms);
+
+  // Cap arrival gap waits to SYNC_WAIT_CAP during sync phase.
+  if (m_syncState != IDVDStreamPlayer::SYNC_INSYNC && maxWaitTime > IDVDStreamPlayer::SYNC_WAIT_CAP)
+  {
+    CLog::LogF(LOGDEBUG, "[SEEKTRACE] Wait-Cap applied. Original: {}ms, Capped: {}ms",
+               static_cast<int>(maxWaitTime.count()),
+               static_cast<int>(IDVDStreamPlayer::SYNC_WAIT_CAP.count()));
+    maxWaitTime = IDVDStreamPlayer::SYNC_WAIT_CAP;
+  }
 
   if (m_syncState != IDVDStreamPlayer::SYNC_INSYNC)
     CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayerVideo::OutputPicture PRE-WAIT - PTS: {:.0f}, clock: {:.0f}, timeToDisplay: {}ms, maxWait: {}ms, speed: {}", pPicture->pts, iPlayingClock, (int)DVD_TIME_TO_MSEC(pPicture->pts - iPlayingClock), (int)maxWaitTime.count(), m_speed);

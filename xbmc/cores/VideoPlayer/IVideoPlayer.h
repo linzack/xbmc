@@ -10,6 +10,7 @@
 
 #include "DVDClock.h"
 
+#include <chrono>
 #include <string>
 #include <utility>
 #include <vector>
@@ -52,6 +53,10 @@ public:
     SYNC_WAITSYNC,
     SYNC_INSYNC
   };
+  static constexpr double SYNC_STALE_RELAXED_SEC{2.0};
+  static constexpr double SYNC_STALE_THRESHOLD_SEC{10.0};
+  static constexpr std::chrono::milliseconds SYNC_WAIT_CAP{100};
+  static constexpr float TEMPO_THRESHOLD{1.01f};
 protected:
   CProcessInfo &m_processInfo;
 };

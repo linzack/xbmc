@@ -1251,6 +1251,8 @@ void CRenderManager::PrepareNextRender()
 void CRenderManager::DiscardBuffer()
 {
   std::unique_lock lock2(m_presentlock);
+  CLog::LogF(LOGDEBUG, "[SEEKTRACE] Resetting lateframes from {} to -1", m_lateframes);
+  m_lateframes = -1;
 
   while(!m_queued.empty())
   {
