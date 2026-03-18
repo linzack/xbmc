@@ -2252,6 +2252,8 @@ void CVideoPlayer::HandlePlaySpeed()
         clock = m_CurrentVideo.starttime - m_CurrentVideo.cachetotal;
       }
 
+      CLog::Log(LOGDEBUG, "[SEEKTRACE] Sync JOIN - clock: {:.3f}, AudioStart: {:.3f}, VideoStart: {:.3f}",
+                clock, m_CurrentAudio.starttime, m_CurrentVideo.starttime);
       m_clock.Discontinuity(clock);
       m_CurrentAudio.syncState = IDVDStreamPlayer::SYNC_INSYNC;
       m_CurrentAudio.avsync = CCurrentStream::AV_SYNC_NONE;
@@ -3279,6 +3281,8 @@ void CVideoPlayer::HandleMessages()
     else if (pMsg->IsType(CDVDMsg::PLAYER_STARTED))
     {
       SStartMsg& msg = std::static_pointer_cast<CDVDMsgType<SStartMsg>>(pMsg)->m_value;
+      CLog::Log(LOGDEBUG, "[SEEKTRACE] PLAYER_STARTED from: {} PRE - VideoSync: {}, AudioSync: {}",
+                static_cast<int>(msg.player), static_cast<int>(m_CurrentVideo.syncState), static_cast<int>(m_CurrentAudio.syncState));
       if (msg.player == VideoPlayer_AUDIO)
       {
         m_CurrentAudio.syncState = IDVDStreamPlayer::SYNC_WAITSYNC;
@@ -4228,7 +4232,10 @@ bool CVideoPlayer::CloseStream(CCurrentStream& current, bool bWaitForBuffers)
 
 void CVideoPlayer::FlushBuffers(double pts, bool accurate, bool sync)
 {
-  CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayer::FlushBuffers - Enter: {:.3f}, Clock: {:.3f}", pts, m_clock.GetClock());
+  CLog::Log(LOGDEBUG, "[SEEKTRACE] FlushBuffers - speed: {}, tempoAllowed: {}, sync: {}",
+            m_playSpeed,
+            m_processInfo->IsTempoAllowed(static_cast<float>(m_playSpeed) / DVD_PLAYSPEED_NORMAL),
+            sync);
   CLog::Log(LOGDEBUG, "CVideoPlayer::FlushBuffers - flushing buffers");
 
   double startpts;
@@ -4289,8 +4296,9 @@ void CVideoPlayer::FlushBuffers(double pts, bool accurate, bool sync)
 
   if (m_playSpeed == DVD_PLAYSPEED_NORMAL || m_playSpeed == DVD_PLAYSPEED_PAUSE ||
       (m_playSpeed >= DVD_PLAYSPEED_NORMAL * m_processInfo->MinTempoPlatform() &&
-       m_playSpeed <= DVD_PLAYSPEED_NORMAL * m_processInfo->MaxTempoPlatform()))
+       m_processInfo->IsTempoAllowed(static_cast<float>(m_playSpeed) / DVD_PLAYSPEED_NORMAL)))
   {
+    CLog::Log(LOGDEBUG, "[SEEKTRACE] CVideoPlayer::FlushBuffers - sync reset required");
     // make sure players are properly flushed, should put them in stalled state
     auto msg = std::make_shared<CDVDMsgGeneralSynchronize>(1s, SYNCSOURCE_AUDIO | SYNCSOURCE_VIDEO);
     m_VideoPlayerAudio->SendMessage(msg, 1);
