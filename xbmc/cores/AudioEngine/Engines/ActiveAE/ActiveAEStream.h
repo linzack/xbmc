@@ -111,6 +111,8 @@ public:
   bool IsDrained();
   void SetRR(double rr, double atempoThreshold);
   double GetRR();
+  // [2406f7257e] KEEP ACTIVE for diagnostic logging
+  bool IsAtempoActive() const { return m_atempoBuffers && m_atempoBuffers->GetTempo() != 1.0f; }
   void FillBuffer();
   bool DoesNormalize();
   void ForceResampler(bool force);

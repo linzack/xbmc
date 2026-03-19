@@ -30,6 +30,8 @@ public:
   bool IsEof() const;
   bool IsActive() const;
   int GetBufferedSamples() const;
+  int64_t GetSamplesIn() const { return m_SamplesIn; }
+  int64_t GetSamplesOut() const { return m_SamplesOut; }
 
 protected:
   bool CreateFilterGraph();

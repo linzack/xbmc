@@ -296,15 +296,38 @@ bool CActiveAEBufferPoolResample::ResampleBuffers(int64_t timestamp)
           in->pkt_start_offset = 0;
         }
 
-        // pts of last sample we added to the buffer
-        m_lastSamplePts +=
-            (in->pkt->nb_samples - in->pkt_start_offset) * 1000 / in->pkt->config.sample_rate;
+        // [30d3ce6694] Before vs After Comparison for integer promotion
+        // 1. Fixed (casted) value
+        int64_t fixedPts = m_lastSamplePts + (int64_t)(in->pkt->nb_samples - in->pkt_start_offset) * 1000 / (int64_t)in->pkt->config.sample_rate;
+
+        // 2. Buggy (promoted) value
+        int64_t buggyPts = m_lastSamplePts + (in->pkt->nb_samples - in->pkt_start_offset) * 1000 / in->pkt->config.sample_rate;
+
+        // 3. Log discrepancy if rollover occurs
+        if (fixedPts != buggyPts) {
+            CLog::Log(LOGINFO, "[PromotionFix-OBS] DISCREPANCY! Fixed:{} Buggy:{} (Rollover Detected!)", 
+                      fixedPts, buggyPts);
+        }
+
+        // 4. Use BUGGY value for "Non-Intervention" observation
+        m_lastSamplePts = buggyPts;
       }
 
       // calculate pts for last sample in m_procSample
       int bufferedSamples = m_resampler->GetBufferedSamples();
       m_procSample->pkt_start_offset = m_procSample->pkt->nb_samples;
-      m_procSample->timestamp = m_lastSamplePts - bufferedSamples * 1000 / m_format.m_sampleRate;
+
+      // [30d3ce6694] Output PTS Comparison
+      int64_t outFixed = m_lastSamplePts - (int64_t)bufferedSamples * 1000 / (int64_t)m_format.m_sampleRate;
+      int64_t outBuggy = m_lastSamplePts - bufferedSamples * 1000 / m_format.m_sampleRate;
+
+      if (outFixed != outBuggy) {
+          CLog::Log(LOGINFO, "[PromotionFix-OBS] OutTS DISCREPANCY! Fixed:{} Buggy:{} (Int-Promotion Bug!)", 
+                    outFixed, outBuggy);
+      }
+
+      // Use BUGGY value for actual logic
+      m_procSample->timestamp = outBuggy;
 
       if ((m_drain || m_changeResampler) && m_empty)
       {
@@ -478,12 +501,21 @@ bool CActiveAEBufferPoolAtempo::Create(unsigned int totaltime)
 
 void CActiveAEBufferPoolAtempo::ChangeFilter()
 {
+  // [SEEKDBG] P2: Track filter re-engagement
+  CLog::Log(LOGINFO, "[SEEKDBG] AtempoChgFilt tempo:{:f} lastPts:{}", m_tempo, m_lastSamplePts);
   m_pTempoFilter->SetTempo(m_tempo);
   m_changeFilter = false;
 }
 
 bool CActiveAEBufferPoolAtempo::ProcessBuffers()
 {
+  // [05875308bd] Log the initial garbage value for observation run
+  static bool first_pts_check = true;
+  if (first_pts_check) {
+      CLog::Log(LOGINFO, "[PromotionFix-OBS] INITIAL m_lastSamplePts value: {}", m_lastSamplePts);
+      first_pts_check = false;
+  }
+
   bool busy = false;
   CSampleBuffer *in;
 
@@ -499,8 +531,44 @@ bool CActiveAEBufferPoolAtempo::ProcessBuffers()
     {
       in = m_inputSamples.front();
       m_inputSamples.pop_front();
+
+      // #### Revert Atempo Bypass Logic (`05875308bd`) - COMPARISON LOGGING
+      // [05875308bd] Log discrepancy for fragile guard and uninitialized garbage
+      {
+          // 1. Calculate FIXED (new) behavior: assumes m_lastSamplePts was initialized to 0
+          // If this is the very first buffer and m_lastSamplePts is garbage, the fixed logic would have used 0.
+          static bool first_bypass_ever = true;
+          int64_t fixedBasePts = (first_bypass_ever && m_lastSamplePts != 0) ? 0 : m_lastSamplePts;
+          int64_t fixedTS = in->timestamp ? in->timestamp : fixedBasePts;
+
+          // 2. Calculate BUGGY (fragile) behavior: uses garbage m_lastSamplePts
+          int64_t buggyTS = (m_lastSamplePts == 0) ? in->timestamp : m_lastSamplePts;
+
+          // 3. Log discrepancy
+          if (fixedTS != buggyTS) {
+              CLog::Log(LOGINFO, "[AtempoBypass-OBS] INITIALIZATION/BYPASS BUG! Fixed:{} Buggy:{} (Garbage: {})", 
+                        fixedTS, buggyTS, m_lastSamplePts);
+          }
+
+          // 4. [FIXED] NON-INTERVENTION: Log the error but DO NOT overwrite the buffer PTS.
+          // This allows us to reach high-speed states for other tests.
+          
+          first_bypass_ever = false;
+      }
+
+      // [AtempoBypass] Post-Sync check log
+      {
+          static int atempo_byp_counter = 0;
+          if (++atempo_byp_counter % 50 == 1)
+              CLog::Log(LOGINFO, "[AtempoBypass] Post-Sync - inTS:{} m_lastSamplePts:{}", 
+                        in->timestamp, m_lastSamplePts);
+      }
+
       m_outputSamples.push_back(in);
       busy = true;
+
+      // Advance m_lastSamplePts as it was done in buggy state
+      m_lastSamplePts += (int64_t)(in->pkt->nb_samples - in->pkt_start_offset) * 1000 / (int64_t)m_format.m_sampleRate;
     }
   }
   else if (m_procSample || !m_freeSamples.empty())
@@ -524,6 +592,22 @@ bool CActiveAEBufferPoolAtempo::ProcessBuffers()
       {
         in = m_inputSamples.front();
         m_inputSamples.pop_front();
+
+        // [SEEKDBG] P1: Track input PTS entering atempo
+        {
+          // [30d3ce6694] Audit Int-Promotion Discrepancy (Input side)
+          int64_t fixedPts = m_lastSamplePts + (int64_t)(in->pkt->nb_samples - in->pkt_start_offset) * 1000 / (int64_t)m_format.m_sampleRate;
+          int64_t buggyPts = m_lastSamplePts + (in->pkt->nb_samples - in->pkt_start_offset) * 1000 / in->pkt->config.sample_rate;
+          if (fixedPts != buggyPts) {
+              CLog::Log(LOGINFO, "[PromotionFix-OBS] AtempoIn DISCREPANCY! Fixed:{} Buggy:{} (Rollover!)", fixedPts, buggyPts);
+          }
+          m_lastSamplePts = buggyPts; // Use BUGGY for observation
+
+          static int seekdbg_in_counter = 0;
+          if (++seekdbg_in_counter % 50 == 1)
+              CLog::Log(LOGINFO, "[SEEKDBG] AtempoIn inTS:{} nb:{} lastPts:{}",
+                  in->timestamp, in->pkt->nb_samples, m_lastSamplePts);
+        }
       }
       else
         in = nullptr;
@@ -562,14 +646,37 @@ bool CActiveAEBufferPoolAtempo::ProcessBuffers()
         else
           in->pkt_start_offset = 0;
 
-        // pts of last sample we added to the buffer
-        m_lastSamplePts += (in->pkt->nb_samples-in->pkt_start_offset) * 1000 / m_format.m_sampleRate;
+        // [30d3ce6694] Integer promotion comparison
+        int64_t fixedPts = m_lastSamplePts + (int64_t)(in->pkt->nb_samples-in->pkt_start_offset) * 1000 / (int64_t)m_format.m_sampleRate;
+        int64_t buggyPts = m_lastSamplePts + (in->pkt->nb_samples-in->pkt_start_offset) * 1000 / m_format.m_sampleRate;
+
+        if (fixedPts != buggyPts) {
+            CLog::Log(LOGINFO, "[PromotionFix-OBS] AtempoIn DISCREPANCY! Fixed:{} Buggy:{}", fixedPts, buggyPts);
+        }
+        m_lastSamplePts = buggyPts;
       }
 
       // calculate pts for last sample in m_procSample
       int bufferedSamples = m_pTempoFilter->GetBufferedSamples();
       m_procSample->pkt_start_offset = m_procSample->pkt->nb_samples;
-      m_procSample->timestamp = m_lastSamplePts - bufferedSamples * 1000 / m_format.m_sampleRate;
+      
+      // [30d3ce6694] Output PTS Comparison
+      int64_t outFixed = m_lastSamplePts - (int64_t)bufferedSamples * 1000 / (int64_t)m_format.m_sampleRate;
+      int64_t outBuggy = m_lastSamplePts - bufferedSamples * 1000 / m_format.m_sampleRate;
+
+      if (outFixed != outBuggy) {
+          CLog::Log(LOGINFO, "[PromotionFix-OBS] AtempoOut DISCREPANCY! Fixed:{} Buggy:{}", outFixed, outBuggy);
+      }
+      m_procSample->timestamp = outBuggy;
+
+      // [SEEKDBG] P1: Track output timestamp computation
+      {
+          static int seekdbg_pb_counter = 0;
+          if (++seekdbg_pb_counter % 50 == 1)
+              CLog::Log(LOGINFO, "[SEEKDBG] AtempoPB lastPts:{} bufSamp:{} outTS:{} sIn:{} sOut:{}",
+                  m_lastSamplePts, bufferedSamples, m_procSample->timestamp,
+                  m_pTempoFilter->GetSamplesIn(), m_pTempoFilter->GetSamplesOut());
+      }
 
       if ((m_drain || m_changeFilter) && m_empty)
       {

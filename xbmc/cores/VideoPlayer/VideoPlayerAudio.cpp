@@ -196,6 +196,7 @@ void CVideoPlayerAudio::CloseStream(bool bWaitForBuffers)
 
 void CVideoPlayerAudio::OnStartup()
 {
+  CLog::Log(LOGINFO, "[AudioStart] CVideoPlayerAudio::OnStartup - thread starting");
 }
 
 void CVideoPlayerAudio::UpdatePlayerInfo()
@@ -575,6 +576,10 @@ bool CVideoPlayerAudio::ProcessDecoderOutput(DVDAudioFrame &audioframe)
       msg.cachetime = m_audioSink.GetDelay();
       msg.timestamp = audioframe.hasTimestamp ? audioframe.pts : DVD_NOPTS_VALUE;
       m_messageParent.Put(std::make_shared<CDVDMsgType<SStartMsg>>(CDVDMsg::PLAYER_STARTED, msg));
+
+      // [SEEKDBG] P2: Track values sent in PLAYER_STARTED for clock computation
+      CLog::Log(LOGINFO, "[SEEKDBG] AudioStart cache:{:f} total:{:f} ts:{:f} hasTS:{}",
+          msg.cachetime, msg.cachetotal, msg.timestamp, audioframe.hasTimestamp);
 
       m_streaminfo.channels = audioframe.format.m_channelLayout.Count();
       m_processInfo.SetAudioChannels(audioframe.format.m_channelLayout);

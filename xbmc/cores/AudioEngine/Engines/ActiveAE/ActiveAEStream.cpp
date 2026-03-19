@@ -174,11 +174,33 @@ void CActiveAEStream::RemapBuffer()
 
 double CActiveAEStream::CalcResampleRatio(double error)
 {
+  // [4b7abb9f2b] DECLARE for observation
+  constexpr double MAX_RESAMPLE_INTEGRAL = 0.01;
+
   //reset the integral on big errors, failsafe
   if (fabs(error) > 1000)
     m_resampleIntegral = 0;
   else if (fabs(error) > 5)
     m_resampleIntegral += error / 1000 / 50;
+
+  // [4b7abb9f2b] KEEP CLAMP LOGGING ACTIVE for audit
+  if (m_resampleIntegral > MAX_RESAMPLE_INTEGRAL) {
+      CLog::LogF(LOGDEBUG, "[SYNC_WINDUP-OBS] Would clamp positive: {:f} -> {:f}", 
+                m_resampleIntegral, MAX_RESAMPLE_INTEGRAL);
+  }
+  else if (m_resampleIntegral < -MAX_RESAMPLE_INTEGRAL) {
+      CLog::LogF(LOGDEBUG, "[SYNC_WINDUP-OBS] Would clamp negative: {:f} -> {:f}", 
+                m_resampleIntegral, -MAX_RESAMPLE_INTEGRAL);
+  }
+
+  /* COMMENT OUT FUNCTIONAL CLAMP [4b7abb9f2b] 
+  if (m_resampleIntegral > MAX_RESAMPLE_INTEGRAL) {
+    m_resampleIntegral = MAX_RESAMPLE_INTEGRAL;
+  }
+  else if (m_resampleIntegral < -MAX_RESAMPLE_INTEGRAL) {
+    m_resampleIntegral = -MAX_RESAMPLE_INTEGRAL;
+  }
+  */
 
   double proportional = 0.0;
 
@@ -195,8 +217,11 @@ double CActiveAEStream::CalcResampleRatio(double error)
   }
 
   double ret = 1.0 / clockspeed + proportional + m_resampleIntegral;
-  //CLog::Log(LOGINFO,"----- error: {:f}, rr: {:f}, prop: {:f}, int: {:f}",
-  //                    error, ret, proportional, m_resampleIntegral);
+  
+  // [4b7abb9f2b] KEEP LOGGING ACTIVE
+  CLog::LogF(LOGDEBUG, "[SYNC_WINDUP] err:{:f} prop:{:f} int:{:f} clkSpd:{:f} mClkSpd:{:f} -> RR:{:f}",
+             error, proportional, m_resampleIntegral, clockspeed, m_clockSpeed, ret);
+
   return ret;
 }
 
@@ -204,8 +229,17 @@ std::chrono::milliseconds CActiveAEStream::GetErrorInterval()
 {
   std::chrono::milliseconds ret = m_errorInterval;
   double rr = m_processingBuffers->GetRR();
+
+  // [2406f7257e] DECLARE for observation but DO NOT bypass the 3x penalty
+  bool isAtempo = m_processingBuffers && m_processingBuffers->IsAtempoActive();
+
+  // [2406f7257e] REVERT TO ORIGINAL LOGIC (3x penalty is ALWAYS applied for large RR)
   if (rr > 1.02 || rr < 0.98)
-    ret *= 3;
+  {
+      ret *= 3;
+      // [2406f7257e] KEEP LOGGING for observation
+      CLog::LogF(LOGDEBUG, "[AtempoFix-OBS] Wow-and-flutter penalty applied. RR:{:f} isAtempo:{}", rr, isAtempo);
+  }
   return ret;
 }
 
