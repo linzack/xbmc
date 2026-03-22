@@ -2485,14 +2485,38 @@ CSampleBuffer* CActiveAE::SyncStream(CActiveAEStream *stream)
                                           : stream->GetErrorInterval();
   bool newerror = stream->m_syncError.Get(error, timeout);
 
-  if (newerror && fabs(error) > threshold && stream->m_syncState == CAESyncInfo::AESyncState::SYNC_INSYNC)
+  if (newerror && stream->m_syncState == CAESyncInfo::AESyncState::SYNC_INSYNC)
   {
-    stream->m_syncState = CAESyncInfo::AESyncState::SYNC_ADJUST;
-    stream->m_processingBuffers->SetRR(1.0, m_settings.atempoThreshold);
-    stream->m_resampleIntegral = 0;
-    stream->m_lastSyncError = error;
-    CLog::Log(LOGDEBUG, "ActiveAE::SyncStream - average error {:f} above threshold of {:f}", error,
-              threshold);
+    // At 1.6x tempo, the 2.0x Atempo ceiling leaves only a (2.0 - tempo)
+    // catch-up rate (0.4x). This is too slow to recover large errors before the
+    // next 1sec update. Switch to SYNC_ADJUST for immediate recovery.
+    constexpr double MAX_ATEMPO_RECOVERY_SECS = 2.0;
+
+    double clockSpeed = stream->m_pClock ? stream->m_pClock->GetClockSpeed() : 1.0;
+    // Catch-up rate depends on direction:
+    // If error > 0 (audio ahead), we slow down towards the 0.5x floor.
+    // If error < 0 (audio behind), we speed up towards the 2.0x ceiling.
+    double atempoMaxCatchup = (error > 0) ? (clockSpeed - 0.5) : (2.0 - clockSpeed);
+
+    // If recovery at max Atempo speed would take > MAX_ATEMPO_RECOVERY_SECS,
+    // switch to SYNC_ADJUST.
+    // This threshold is high enough to protect 1.0x tempo from redundant skips.
+    bool wouldBeSlowRecovery =
+        atempoMaxCatchup > 0.0 &&
+        (fabs(error) / (atempoMaxCatchup * 1000.0) > MAX_ATEMPO_RECOVERY_SECS);
+
+    if (fabs(error) > threshold || wouldBeSlowRecovery)
+    {
+      stream->m_syncState = CAESyncInfo::AESyncState::SYNC_ADJUST;
+      stream->m_processingBuffers->SetRR(1.0, m_settings.atempoThreshold);
+      stream->m_resampleIntegral = 0;
+      stream->m_lastSyncError = error;
+
+      if (fabs(error) > threshold)
+        CLog::Log(LOGDEBUG, "ActiveAE::SyncStream - average error {:f} above threshold of {:f}", error, threshold);
+      else
+        CLog::Log(LOGDEBUG, "ActiveAE::SyncStream - average error {:f} avoid slow recovery", error);
+    }
   }
   else if (newerror && stream->m_syncState == CAESyncInfo::AESyncState::SYNC_MUTE)
   {
