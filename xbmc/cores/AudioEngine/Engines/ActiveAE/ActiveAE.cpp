@@ -80,10 +80,10 @@ void CEngineStats::GetDelay(AEDelayStatus& status)
   std::unique_lock lock(m_lock);
   status = m_sinkDelay;
   if (m_pcmOutput)
-    status.delay += (double)m_bufferedSamples / m_sinkSampleRate;
+    status.delay += static_cast<double>(m_bufferedSamples) / static_cast<int>(m_sinkSampleRate);
   else
     status.delay +=
-        static_cast<double>(m_bufferedSamples) * m_sinkFormat.m_streamInfo.GetDuration() / 1000;
+        static_cast<double>(static_cast<int64_t>(m_bufferedSamples) * m_sinkFormat.m_streamInfo.GetDuration()) / 1000.0;
 }
 
 void CEngineStats::AddStream(unsigned int streamid)
@@ -152,10 +152,10 @@ void CEngineStats::GetDelay(AEDelayStatus& status, CActiveAEStream *stream)
   status = m_sinkDelay;
   status.delay += static_cast<double>(m_sinkLatency);
   if (m_pcmOutput)
-    status.delay += (double)m_bufferedSamples / m_sinkSampleRate;
+    status.delay += static_cast<double>(m_bufferedSamples) / static_cast<int>(m_sinkSampleRate);
   else
     status.delay +=
-        static_cast<double>(m_bufferedSamples) * m_sinkFormat.m_streamInfo.GetDuration() / 1000;
+        static_cast<double>(static_cast<int64_t>(m_bufferedSamples) * m_sinkFormat.m_streamInfo.GetDuration()) / 1000.0;
 
   for (auto &str : m_streamStats)
   {
@@ -176,10 +176,10 @@ void CEngineStats::GetSyncInfo(CAESyncInfo& info, CActiveAEStream *stream)
   AEDelayStatus status;
   status = m_sinkDelay;
   if (m_pcmOutput)
-    status.delay += (double)m_bufferedSamples / m_sinkSampleRate;
+    status.delay += static_cast<double>(m_bufferedSamples) / static_cast<int>(m_sinkSampleRate);
   else
     status.delay +=
-        static_cast<double>(m_bufferedSamples) * m_sinkFormat.m_streamInfo.GetDuration() / 1000;
+        static_cast<double>(static_cast<int64_t>(m_bufferedSamples) * m_sinkFormat.m_streamInfo.GetDuration()) / 1000.0;
 
   status.delay += static_cast<double>(m_sinkLatency);
 
@@ -232,9 +232,9 @@ float CEngineStats::GetWaterLevel()
 {
   std::unique_lock lock(m_lock);
   if (m_pcmOutput)
-    return static_cast<float>(m_bufferedSamples) / m_sinkSampleRate;
+    return static_cast<float>(m_bufferedSamples) / static_cast<int>(m_sinkSampleRate);
   else
-    return static_cast<float>(m_bufferedSamples * m_sinkFormat.m_streamInfo.GetDuration()) / 1000;
+    return static_cast<float>(static_cast<int64_t>(m_bufferedSamples) * m_sinkFormat.m_streamInfo.GetDuration()) / 1000.0f;
 }
 
 void CEngineStats::SetSuspended(bool state)
