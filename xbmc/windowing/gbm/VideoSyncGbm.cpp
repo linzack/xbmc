@@ -90,7 +90,13 @@ void CVideoSyncGbm::Run(CEvent& stopEvent)
   while (!stopEvent.Signaled() && !m_abort)
   {
     uint64_t sequence = 0, ns = 0;
+    uint64_t startWait = CurrentHostCounter();
     usleep(1000);
+    uint64_t endWait = CurrentHostCounter();
+
+    if (endWait - startWait > 10000000) // Log if wakeup took > 10ms
+      CLog::Log(LOGDEBUG, "CVideoSyncGbm: Polling Latency Spike: {}ms", (endWait - startWait) / 1000000);
+
     int s = drmCrtcGetSequence(m_fd, m_crtcId, &sequence, &ns);
     if (s != 0)
     {
@@ -100,6 +106,15 @@ void CVideoSyncGbm::Run(CEvent& stopEvent)
 
     if (sequence == m_sequence)
       continue;
+
+    // Drift check must happen after ns is populated by drmCrtcGetSequence
+    uint64_t now = CurrentHostCounter();
+    int64_t drift = static_cast<int64_t>(now) - static_cast<int64_t>(m_offset + ns);
+    if (std::abs(drift) > 5000000) // Log if drift > 5ms
+    {
+      CLog::Log(LOGDEBUG, "CVideoSyncGbm: Global Clock Drift: {}ns (Host: {} vs Vblank: {})", 
+                drift, now, m_offset + ns);
+    }
 
     m_refClock->UpdateClock(sequence - m_sequence, m_offset + ns);
     m_sequence = sequence;

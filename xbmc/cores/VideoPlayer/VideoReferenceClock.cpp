@@ -124,10 +124,8 @@ void CVideoReferenceClock::UpdateClockInternal(int NrVBlanks, bool CheckMissed)
   if (CheckMissed) //set to true from the vblank run function, set to false from Wait and GetTime
   {
     if (NrVBlanks < m_MissedVblanks) //if this is true the vblank detection in the run function is wrong
-      CLog::Log(
-          LOGDEBUG,
-          "CVideoReferenceClock: detected {} vblanks, missed {}, refreshrate might have changed",
-          NrVBlanks, m_MissedVblanks);
+      CLog::Log(LOGDEBUG, "CVideoReferenceClock: DISCREPANCY detected {} vblanks (hardware), missed {} (predicted). Clock: {}, LastVblank: {}",
+                NrVBlanks, m_MissedVblanks, m_CurrTime, m_VblankTime);
 
     NrVBlanks -= m_MissedVblanks; //subtract the vblanks we missed
     m_MissedVblanks = 0;
@@ -172,8 +170,15 @@ int64_t CVideoReferenceClock::GetTime(bool interpolated /* = true*/)
     Now = CurrentHostCounter();        //get current system time
     NextVblank = TimeOfNextVblank();   //get time when the next vblank should happen
 
+    bool loggedSpeculative = false;
     while(Now >= NextVblank)  //keep looping until the next vblank is in the future
     {
+      if (!loggedSpeculative)
+      {
+        CLog::Log(LOGDEBUG, "CVideoReferenceClock: Speculative jump. Delta: {}ns, Threshold: {}ns",
+                  (int64_t)(Now - m_VblankTime), (int64_t)(NextVblank - m_VblankTime));
+        loggedSpeculative = true;
+      }
       UpdateClockInternal(1, false); //update clock when next vblank should have happened already
       NextVblank = TimeOfNextVblank(); //get time when the next vblank should happen
     }
