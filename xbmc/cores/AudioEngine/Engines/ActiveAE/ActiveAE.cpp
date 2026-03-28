@@ -2073,15 +2073,28 @@ bool CActiveAE::RunStages()
         if (isTrueHDPassthrough)
           error *= 0.45;
 
-        if (error > maxError)
+        // MODIFY: [REFCLK_DIAG] Replaces existing "large audio sync error" log (Point 3)
+        if (error > maxError || error < -maxError)
         {
-          CLog::Log(LOGWARNING, "ActiveAE - large audio sync error: {:f}", error);
-          error = maxError;
+          CLog::Log(LOGWARNING, "[REFCLK_DIAG] ActiveAE sync error: {:f} "
+                    "(rawPTS: {:f}, delay: {:f}, playingPts: {:f}, Clock: {:f}, "
+                    "Speed: {:f}, SyncState: {}, WaterLevel: {:f})",
+                    error, pts, delay, playingPts,
+                    (*it)->m_pClock->GetClock(), (*it)->m_pClock->GetClockSpeed(),
+                    static_cast<int>((*it)->m_syncState),
+                    m_stats.GetWaterLevel());
+          error = (error > 0) ? maxError : -maxError;
         }
-        else if (error < -maxError)
+        // NEW: [REFCLK_DIAG] Log Point 4 - Recovery Decomposition (Recovery Path)
+        else if ((*it)->m_syncState != CAESyncInfo::SYNC_INSYNC && fabs(error) > 500)
         {
-          CLog::Log(LOGWARNING, "ActiveAE - large audio sync error: {:f}", error);
-          error = -maxError;
+          CLog::Log(LOGDEBUG, "[REFCLK_DIAG] ActiveAE recovery: {:f} "
+                    "(rawPTS: {:f}, delay: {:f}, playingPts: {:f}, Clock: {:f}, "
+                    "SyncState: {}, WaterLevel: {:f})",
+                    error, pts, delay, playingPts,
+                    (*it)->m_pClock->GetClock(),
+                    static_cast<int>((*it)->m_syncState),
+                    m_stats.GetWaterLevel());
         }
         (*it)->m_syncError.Add(error);
       }

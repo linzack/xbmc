@@ -54,6 +54,14 @@ void CVideoReferenceClock::UpdateClock(int NrVBlanks, uint64_t time)
 {
   std::unique_lock lock(m_CritSection);
 
+  // NEW: [REFCLK_DIAG] Log hardware catch-up magnitude
+  if (m_MissedVblanks > 1) 
+  {
+    CLog::Log(LOGDEBUG, "[REFCLK_DIAG] HW Update: vblanks={}, missed={}, "
+              "VblankTime_old={}, VblankTime_new={}, CurrTime={}, ClockSpeed={:.2f}",
+              NrVBlanks, m_MissedVblanks, m_VblankTime, time, m_CurrTime, m_ClockSpeed);
+  }
+
   m_VblankTime = time;
   UpdateClockInternal(NrVBlanks, true);
 }
@@ -124,10 +132,8 @@ void CVideoReferenceClock::UpdateClockInternal(int NrVBlanks, bool CheckMissed)
   if (CheckMissed) //set to true from the vblank run function, set to false from Wait and GetTime
   {
     if (NrVBlanks < m_MissedVblanks) //if this is true the vblank detection in the run function is wrong
-      CLog::Log(
-          LOGDEBUG,
-          "CVideoReferenceClock: detected {} vblanks, missed {}, refreshrate might have changed",
-          NrVBlanks, m_MissedVblanks);
+      CLog::Log(LOGDEBUG, "[REFCLK_DIAG] DISCREPANCY detected {} vblanks (hardware), missed {} (predicted). Clock: {}, LastVblank: {}",
+                NrVBlanks, m_MissedVblanks, m_CurrTime, m_VblankTime);
 
     NrVBlanks -= m_MissedVblanks; //subtract the vblanks we missed
     m_MissedVblanks = 0;
@@ -172,8 +178,18 @@ int64_t CVideoReferenceClock::GetTime(bool interpolated /* = true*/)
     Now = CurrentHostCounter();        //get current system time
     NextVblank = TimeOfNextVblank();   //get time when the next vblank should happen
 
+    bool loggedSpeculative = false;
     while(Now >= NextVblank)  //keep looping until the next vblank is in the future
     {
+      if (!loggedSpeculative)
+      {
+        // MODIFY: [REFCLK_DIAG] Add m_CurrTime and m_ClockSpeed
+        CLog::Log(LOGDEBUG, "[REFCLK_DIAG] Speculative jump. CurrTime={}, ClockSpeed={:.2f}, "
+                  "Delta: {}ns, Threshold: {}ns",
+                  m_CurrTime, m_ClockSpeed,
+                  (int64_t)(Now - m_VblankTime), (int64_t)(NextVblank - m_VblankTime));
+        loggedSpeculative = true;
+      }
       UpdateClockInternal(1, false); //update clock when next vblank should have happened already
       NextVblank = TimeOfNextVblank(); //get time when the next vblank should happen
     }
