@@ -26,6 +26,7 @@ public:
   virtual ~IAEClockCallback() = default;
   virtual double GetClock() = 0;
   virtual double GetClockSpeed() { return 1.0; }
+  virtual void Discontinuity(double clockMs) {}
 };
 
 class CAESyncInfo

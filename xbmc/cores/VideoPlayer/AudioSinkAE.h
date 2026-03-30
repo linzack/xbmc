@@ -60,6 +60,7 @@ public:
 
   double GetClock() override;
   double GetClockSpeed() override;
+  void Discontinuity(double clockMs) override;
 
   CAEStreamInfo::DataType GetPassthroughStreamType(AVCodecID codecId, int samplerate, int profile);
 

@@ -40,6 +40,14 @@ constexpr float MIN_WATER_LEVEL = 0.02f; // min buffer time to prevent underrun
 constexpr float MIN_WATER_LEVEL_RESAMPLE = 0.1f; // min buffer time in resample mode
 constexpr float BUFFER_LEVEL_INCREMENT = 0.0001f; // increment step for ramp-up
 constexpr double MAX_BUFFER_TIME = 0.1; // max time of a buffer in seconds;
+
+// Buffer Filling Constants
+constexpr float TEMPO_FILL_FACTOR = 0.8f;   // Wait for 80% of target
+constexpr float TEMPO_FILL_CAP = 0.15f;    // Max wait 150ms (RPi4 limit safety)
+
+// Resilience Constants
+constexpr double ACTIVEAE_SYNC_JUMP_THRESHOLD = 2000.0;
+constexpr auto ACTIVEAE_SYNC_FLUSH_INTERVAL = std::chrono::milliseconds(100);
 } // unnamed namespace
 
 void CEngineStats::Reset(unsigned int sampleRate, bool pcm)
@@ -2068,12 +2076,24 @@ bool CActiveAE::RunStages()
         double maxError = ((*it)->m_syncState == CAESyncInfo::SYNC_INSYNC) ? 1000 : 5000;
         double error = playingPts - (*it)->m_pClock->GetClock();
 
+        // [REFCLK_DIAG] Jump Sync Recovery: Detect massive stall (>2s)
+        if (fabs(error) > ACTIVEAE_SYNC_JUMP_THRESHOLD)
+        {
+          CLog::Log(LOGWARNING, "[REFCLK_DIAG] Sync Jump Trigger: error {:f}ms (Clock: {:f}ms, Audio: {:f}ms)",
+                    error, (*it)->m_pClock->GetClock(), playingPts);
+
+          (*it)->m_pClock->Discontinuity(playingPts);
+          (*it)->m_syncError.Flush(ACTIVEAE_SYNC_FLUSH_INTERVAL);
+
+          CLog::Log(LOGDEBUG, "[REFCLK_DIAG] Sync Jump Success: New Clock: {:f}ms", (*it)->m_pClock->GetClock());
+          continue; // skip normal accumulation and processing this cycle
+        }
+
         // underestimate error for TrueHD passthrough
         // oscillations should be less than frametime 40ms to avoid unnecessary a/v sync corrections
         if (isTrueHDPassthrough)
           error *= 0.45;
 
-        // MODIFY: [REFCLK_DIAG] Replaces existing "large audio sync error" log (Point 3)
         if (error > maxError || error < -maxError)
         {
           CLog::Log(LOGWARNING, "[REFCLK_DIAG] ActiveAE sync error: {:f} "
@@ -2478,6 +2498,22 @@ CSampleBuffer* CActiveAE::SyncStream(CActiveAEStream *stream)
 
   if (stream->m_syncState == CAESyncInfo::AESyncState::SYNC_START)
   {
+    float fillThreshold = m_targetBufferLevel * TEMPO_FILL_FACTOR;
+    if (m_settings.lowLatencyMode)
+      fillThreshold = std::min(fillThreshold, TEMPO_FILL_CAP);
+
+    if (stream->m_pClock->GetClockSpeed() > 1.0 && m_stats.GetWaterLevel() < fillThreshold)
+    {
+      CLog::Log(LOGDEBUG, "[REFCLK_DIAG] SyncStream: Filling high-tempo buffer (level: {:f}, target: {:f})", m_stats.GetWaterLevel(), fillThreshold);
+      return nullptr;
+    }
+
+    if (stream->m_pClock->GetClockSpeed() > 1.0)
+    {
+      CLog::Log(LOGDEBUG, "[REFCLK_DIAG] SyncStream: Buffer filled (level: {:f}, threshold: {:f}), starting sync", 
+                m_stats.GetWaterLevel(), fillThreshold);
+    }
+
     stream->m_syncState = CAESyncInfo::AESyncState::SYNC_MUTE;
     stream->m_syncError.Flush(100ms);
     stream->m_processingBuffers->SetRR(1.0, m_settings.atempoThreshold);

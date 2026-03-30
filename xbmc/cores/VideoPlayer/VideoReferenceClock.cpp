@@ -183,7 +183,15 @@ int64_t CVideoReferenceClock::GetTime(bool interpolated /* = true*/)
     {
       if (!loggedSpeculative)
       {
-        // MODIFY: [REFCLK_DIAG] Add m_CurrTime and m_ClockSpeed
+        // [REFCLK_DIAG] Massive Stall Detection: Log >1s jumps (Point 2)
+        double jumpMs = static_cast<double>(Now - NextVblank) * 1000.0 / m_SystemFrequency;
+        if (jumpMs > 1000.0)
+        {
+          CLog::Log(LOGWARNING, "[REFCLK_DIAG] Massive Stall Detected: Speculative jump of {:f}ms. "
+                    "Hardware sync loss likely.", jumpMs);
+        }
+
+        // MODIFY: [REFCLK_DIAG] Add m_CurrTime and m_ClockSpeed (Point 1)
         CLog::Log(LOGDEBUG, "[REFCLK_DIAG] Speculative jump. CurrTime={}, ClockSpeed={:.2f}, "
                   "Delta: {}ns, Threshold: {}ns",
                   m_CurrTime, m_ClockSpeed,
@@ -269,7 +277,7 @@ double CVideoReferenceClock::GetRefreshRate(double* interval /*= NULL*/)
     return -1;
 }
 
-#define MAXVBLANKDELAY 13LL
+#define MAXVBLANKDELAY 20LL // Increase jitter tolerance from 30% to 100%
 //guess when the next vblank should happen,
 //based on the refreshrate and when the previous one happened
 //increase that by 30% to allow for errors

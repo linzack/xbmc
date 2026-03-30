@@ -340,6 +340,12 @@ double CAudioSinkAE::GetClockSpeed()
     return 1.0;
 }
 
+void CAudioSinkAE::Discontinuity(double clockMs)
+{
+  if (m_pClock)
+    m_pClock->Discontinuity(clockMs * DVD_TIME_BASE / 1000.0);
+}
+
 CAEStreamInfo::DataType CAudioSinkAE::GetPassthroughStreamType(AVCodecID codecId,
                                                                int samplerate,
                                                                int profile)
