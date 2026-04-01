@@ -2498,17 +2498,21 @@ CSampleBuffer* CActiveAE::SyncStream(CActiveAEStream *stream)
 
   if (stream->m_syncState == CAESyncInfo::AESyncState::SYNC_START)
   {
+    double speed = stream->m_pClock->GetClockSpeed();
+    if (speed > 1.0 && speed <= 1.5)
+      CLog::Log(LOGDEBUG, "[REFCLK_DIAG] SyncStream: Moderate speed detected ({:.2f}). Skipping extra priming delay.", speed);
+
     float fillThreshold = m_targetBufferLevel * TEMPO_FILL_FACTOR;
     if (m_settings.lowLatencyMode)
       fillThreshold = std::min(fillThreshold, TEMPO_FILL_CAP);
 
-    if (stream->m_pClock->GetClockSpeed() > 1.0 && m_stats.GetWaterLevel() < fillThreshold)
+    if (speed > 1.5 && m_stats.GetWaterLevel() < fillThreshold)
     {
       CLog::Log(LOGDEBUG, "[REFCLK_DIAG] SyncStream: Filling high-tempo buffer (level: {:f}, target: {:f})", m_stats.GetWaterLevel(), fillThreshold);
       return nullptr;
     }
 
-    if (stream->m_pClock->GetClockSpeed() > 1.0)
+    if (speed > 1.5)
     {
       CLog::Log(LOGDEBUG, "[REFCLK_DIAG] SyncStream: Buffer filled (level: {:f}, threshold: {:f}), starting sync", 
                 m_stats.GetWaterLevel(), fillThreshold);

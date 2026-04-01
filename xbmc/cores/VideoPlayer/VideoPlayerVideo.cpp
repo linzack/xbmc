@@ -365,7 +365,9 @@ void CVideoPlayerVideo::Process()
         m_outputSate = OutputPicture(&m_picture);
         if (m_outputSate == OUTPUT_AGAIN)
         {
+          CLog::Log(LOGDEBUG, "[REFCLK_DIAG] OutputPicture timeout (retry) - snoozing 10ms");
           onlyPrioMsgs = true;
+          CThread::Sleep(10ms);
           continue;
         }
       }

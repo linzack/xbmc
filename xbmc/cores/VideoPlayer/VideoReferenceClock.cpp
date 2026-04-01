@@ -178,8 +178,11 @@ int64_t CVideoReferenceClock::GetTime(bool interpolated /* = true*/)
     Now = CurrentHostCounter();        //get current system time
     NextVblank = TimeOfNextVblank();   //get time when the next vblank should happen
 
+    if (Now >= NextVblank && m_ClockSpeed <= 0.01)
+      CLog::Log(LOGDEBUG, "[REFCLK_DIAG] GetTime: Speculative jump suppressed - effectively paused (speed: {:.2f})", m_ClockSpeed);
+
     bool loggedSpeculative = false;
-    while(Now >= NextVblank)  //keep looping until the next vblank is in the future
+    while(Now >= NextVblank && m_ClockSpeed > 0.01)  //keep looping until the next vblank is in the future
     {
       if (!loggedSpeculative)
       {
@@ -231,13 +234,11 @@ void CVideoReferenceClock::SetSpeed(double Speed)
 {
   std::unique_lock SingleLock(m_CritSection);
   //VideoPlayer can change the speed to fit the rereshrate
-  if (m_UseVblank)
+  if (Speed != m_ClockSpeed)
   {
-    if (Speed != m_ClockSpeed)
-    {
-      m_ClockSpeed = Speed;
-      CLog::Log(LOGDEBUG, "CVideoReferenceClock: Clock speed {:0.2f} %", m_ClockSpeed * 100.0);
-    }
+    CLog::Log(LOGDEBUG, "[REFCLK_DIAG] SetSpeed: Changing from {:.2f} to {:.2f}", m_ClockSpeed, Speed);
+    m_ClockSpeed = Speed;
+    CLog::Log(LOGDEBUG, "CVideoReferenceClock: Clock speed {:0.2f} %", m_ClockSpeed * 100.0);
   }
 }
 
@@ -246,10 +247,7 @@ double CVideoReferenceClock::GetSpeed()
   std::unique_lock SingleLock(m_CritSection);
 
   //VideoPlayer needs to know the speed for the resampler
-  if (m_UseVblank)
-    return m_ClockSpeed;
-  else
-    return 1.0;
+  return m_ClockSpeed;
 }
 
 void CVideoReferenceClock::UpdateRefreshrate()
@@ -280,7 +278,7 @@ double CVideoReferenceClock::GetRefreshRate(double* interval /*= NULL*/)
 #define MAXVBLANKDELAY 20LL // Increase jitter tolerance from 30% to 100%
 //guess when the next vblank should happen,
 //based on the refreshrate and when the previous one happened
-//increase that by 30% to allow for errors
+//increase that by 100% to allow for errors
 int64_t CVideoReferenceClock::TimeOfNextVblank() const
 {
   return m_VblankTime + (m_SystemFrequency / MathUtils::round_int(m_RefreshRate) * MAXVBLANKDELAY / 10LL);
