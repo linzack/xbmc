@@ -43,6 +43,14 @@ constexpr float MIN_WATER_LEVEL_RESAMPLE = 0.1f; // min buffer time in resample 
 constexpr float BUFFER_LEVEL_INCREMENT = 0.0001f; // increment step for ramp-up
 constexpr double MAX_BUFFER_TIME = 0.1; // max time of a buffer in seconds;
 
+// Buffer Filling Constants (from ce12636)
+constexpr float TEMPO_FILL_FACTOR = 0.8f;   // Wait for 80% of target
+constexpr float TEMPO_FILL_CAP = 0.15f;    // Max wait 150ms (RPi4 limit safety)
+
+// Resilience Constants (from ce12636)
+constexpr double ACTIVEAE_SYNC_JUMP_THRESHOLD = 2000.0;
+constexpr auto ACTIVEAE_SYNC_FLUSH_INTERVAL = std::chrono::milliseconds(100);
+
 bool IsDefaultDevice(const AESinkDevice& device)
 {
   return StringUtils::EqualsNoCase(device.name, "default");
@@ -2086,20 +2094,42 @@ bool CActiveAE::RunStages()
         double maxError = ((*it)->m_syncState == CAESyncInfo::SYNC_INSYNC) ? 1000 : 5000;
         double error = playingPts - (*it)->m_pClock->GetClock();
 
-        // underestimate error for TrueHD passthrough
-        // oscillations should be less than frametime 40ms to avoid unnecessary a/v sync corrections
+        // [EVAL_SHADOW][ce12636] Thread-safe check for Jump Sync trigger (>2s) & 100ms flush interval reference
+        if (fabs(error) > ACTIVEAE_SYNC_JUMP_THRESHOLD)
+        {
+          static std::atomic<int64_t> lastStallLogTime{0};
+          auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+          int64_t prevLogTime = lastStallLogTime.load();
+          if (nowMs - prevLogTime >= 1000 && lastStallLogTime.compare_exchange_strong(prevLogTime, nowMs))
+          {
+            const char* formatConfig = "PCM";
+            if (isTrueHDPassthrough)
+              formatConfig = "TrueHD";
+            else if (m_settings.passthrough)
+              formatConfig = "PassthroughSettingsConfigured";
+
+            CLog::Log(LOGWARNING, "[EVAL_SHADOW][STALL_DETECTED] Sync error {:.2f}ms > {:.0f}ms! "
+                      "(Clock: {:.2f}ms, Audio: {:.2f}ms, FormatConfig: {}). Baseline continues resample; Fix ce12636 would trigger Discontinuity(target: {:.2f}ms) and flush sync error (interval: {}ms).",
+                      error, ACTIVEAE_SYNC_JUMP_THRESHOLD, (*it)->m_pClock->GetClock(), playingPts, formatConfig, playingPts,
+                      std::chrono::duration_cast<std::chrono::milliseconds>(ACTIVEAE_SYNC_FLUSH_INTERVAL).count());
+          }
+          // Baseline path continues: no (*it)->m_pClock->Discontinuity() called in baseline run
+        }
+
         if (isTrueHDPassthrough)
           error *= 0.45;
 
-        if (error > maxError)
+        // Retained baseline audio sync error limit check (rate-limited for evaluation)
+        if (error > maxError || error < -maxError)
         {
-          CLog::Log(LOGWARNING, "ActiveAE - large audio sync error: {:f}", error);
-          error = maxError;
-        }
-        else if (error < -maxError)
-        {
-          CLog::Log(LOGWARNING, "ActiveAE - large audio sync error: {:f}", error);
-          error = -maxError;
+          static std::atomic<int64_t> lastSyncLimitLogTime{0};
+          auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+          int64_t prevLogTime = lastSyncLimitLogTime.load();
+          if (nowMs - prevLogTime >= 1000 && lastSyncLimitLogTime.compare_exchange_strong(prevLogTime, nowMs))
+          {
+            CLog::Log(LOGWARNING, "[EVAL_SHADOW] ActiveAE sync error limit exceeded: {:.2f}ms (max: {:.2f}ms)", error, maxError);
+          }
+          error = (error > 0) ? maxError : -maxError;
         }
         (*it)->m_syncError.Add(error);
       }
@@ -2483,6 +2513,42 @@ CSampleBuffer* CActiveAE::SyncStream(CActiveAEStream *stream)
 
   if (stream->m_syncState == CAESyncInfo::AESyncState::SYNC_START)
   {
+    // [EVAL_SHADOW][19621a9 & ce12636] Insertion-only 3-state diagnostic priming threshold comparison
+    double speed = stream->m_pClock->GetClockSpeed();
+    float waterLevel = m_stats.GetWaterLevel();
+    
+    // True Pre-Commit Baseline Predicate (0.5f hardcoded threshold)
+    bool baselineWouldHold = (speed > 1.0 && waterLevel < 0.5f);
+    
+    // Intermediate ce12636 Predicate (speed > 1.0 with fillFactor threshold)
+    float fixedFillThreshold = m_targetBufferLevel * TEMPO_FILL_FACTOR;
+    if (m_settings.lowLatencyMode)
+      fixedFillThreshold = std::min(fixedFillThreshold, TEMPO_FILL_CAP);
+    bool ce12636OnlyWouldHold = (speed > 1.0 && waterLevel < fixedFillThreshold);
+
+    // Final 19621a9 Predicate (speed > 1.5 with fillFactor threshold)
+    bool fixedWouldHold = (speed > 1.5 && waterLevel < fixedFillThreshold);
+
+    static std::atomic<int64_t> lastPrimingLogTime{0};
+    auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    int64_t prevLogTime = lastPrimingLogTime.load();
+    if ((baselineWouldHold || fixedWouldHold || ce12636OnlyWouldHold) && nowMs - prevLogTime >= 1000 && lastPrimingLogTime.compare_exchange_strong(prevLogTime, nowMs))
+    {
+      bool moderateSpeedBand = (speed > 1.0 && speed <= 1.5);
+      CLog::Log(LOGDEBUG, "[EVAL_SHADOW][PRIMING_DIVERGENCE] Speed: {:.2f}, WaterLevel: {:.3f} | "
+                "Baseline (500ms): {}, ce12636-Only ({:.0f}ms): {}, Final 19621a9 ({:.0f}ms): {} | "
+                "Moderate Speed Band (1.0 < speed <= 1.5): {}",
+                speed, waterLevel, baselineWouldHold, fixedFillThreshold * 1000.0f, ce12636OnlyWouldHold,
+                fixedFillThreshold * 1000.0f, fixedWouldHold, moderateSpeedBand ? "YES (19621a9 skips hold)" : "NO");
+    }
+
+    // True pre-ce12636 baseline runtime execution branch (0.5f threshold)
+    if (stream->m_pClock->GetClockSpeed() > 1.0 && m_stats.GetWaterLevel() < 0.5f)
+    {
+      CLog::Log(LOGDEBUG, "SyncStream: Priming high-tempo buffer (level: {:f})", m_stats.GetWaterLevel());
+      return nullptr;
+    }
+
     stream->m_syncState = CAESyncInfo::AESyncState::SYNC_MUTE;
     stream->m_syncError.Flush(100ms);
     stream->m_processingBuffers->SetRR(1.0, m_settings.atempoThreshold);

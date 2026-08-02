@@ -60,6 +60,8 @@ public:
 
   double GetClock() override;
   double GetClockSpeed() override;
+  // [EVAL_SHADOW][ce12636] Bridge header declaration for compile coverage
+  void Discontinuity(double clockMs) override;
 
   CAEStreamInfo::DataType GetPassthroughStreamType(AVCodecID codecId, int samplerate, int profile);
 

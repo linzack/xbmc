@@ -366,6 +366,19 @@ void CVideoPlayerVideo::Process()
         m_outputSate = OutputPicture(&m_picture);
         if (m_outputSate == OUTPUT_AGAIN)
         {
+          // [EVAL_SHADOW][19621a9] Measure OUTPUT_AGAIN spin frequency while preserving baseline non-sleeping loop
+          static std::atomic<uint64_t> spinCount{0};
+          static std::atomic<int64_t> lastSpinLogTime{0};
+          spinCount++;
+          auto nowMs = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+          int64_t prevLogTime = lastSpinLogTime.load();
+          if (nowMs - prevLogTime >= 1000 && lastSpinLogTime.compare_exchange_strong(prevLogTime, nowMs))
+          {
+            uint64_t spins = spinCount.exchange(0);
+            double estSleepCostMs = spins * 10.0;
+            CLog::Log(LOGDEBUG, "[EVAL_SHADOW][BUSY_LOOP_SPIN] OUTPUT_AGAIN retry active: {} spins/sec! "
+                      "Baseline spins CPU 100%%; Fix 19621a9 would add 10ms sleep per retry (Est. Sleep Cost: {:.0f}ms/sec).", spins, estSleepCostMs);
+          }
           onlyPrioMsgs = true;
           continue;
         }

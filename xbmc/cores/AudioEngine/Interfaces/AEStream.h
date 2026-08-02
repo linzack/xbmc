@@ -26,6 +26,8 @@ public:
   virtual ~IAEClockCallback() = default;
   virtual double GetClock() = 0;
   virtual double GetClockSpeed() { return 1.0; }
+  // [EVAL_SHADOW][ce12636] Discontinuity interface method definition added for shadow build compile coverage
+  virtual void Discontinuity(double clockMs) {}
 };
 
 class CAESyncInfo
