@@ -123,6 +123,22 @@ void CVideoReferenceClock::UpdateClockInternal(int NrVBlanks, bool CheckMissed)
 {
   if (CheckMissed) //set to true from the vblank run function, set to false from Wait and GetTime
   {
+    // [EVAL_SHADOW_FIXED] Evaluated strictly inside CheckMissed event on vblank update path under m_CritSection
+    int64_t vblankPeriod = m_SystemFrequency / MathUtils::round_int(m_RefreshRate);
+    int64_t nextVblank13 = m_VblankTime + (vblankPeriod * 13LL / 10LL);
+    int64_t nextVblank20 = m_VblankTime + (vblankPeriod * 20LL / 10LL);
+    int64_t now = CurrentHostCounter();
+
+    if (now >= nextVblank13 && now < nextVblank20)
+    {
+      static uint32_t jitterSkip = 0;
+      if (++jitterSkip >= 60)
+      {
+        jitterSkip = 0;
+        CLog::Log(LOGDEBUG, "[EVAL_SHADOW][VBLANK_JITTER_WINDOW] Baseline 13LL: YES, Fixed 20LL: NO.");
+      }
+    }
+
     if (NrVBlanks < m_MissedVblanks) //if this is true the vblank detection in the run function is wrong
       CLog::Log(
           LOGDEBUG,

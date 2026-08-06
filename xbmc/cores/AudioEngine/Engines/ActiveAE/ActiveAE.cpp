@@ -43,6 +43,13 @@ constexpr float MIN_WATER_LEVEL_RESAMPLE = 0.1f; // min buffer time in resample 
 constexpr float BUFFER_LEVEL_INCREMENT = 0.0001f; // increment step for ramp-up
 constexpr double MAX_BUFFER_TIME = 0.1; // max time of a buffer in seconds;
 
+// Buffer Filling Constants (from ce12636)
+constexpr float TEMPO_FILL_FACTOR = 0.8f;   // Wait for 80% of target
+constexpr float TEMPO_FILL_CAP = 0.15f;    // Max wait 150ms (RPi4 limit safety)
+
+// Resilience Constants (from ce12636)
+constexpr double ACTIVEAE_SYNC_JUMP_THRESHOLD = 2000.0;
+
 bool IsDefaultDevice(const AESinkDevice& device)
 {
   return StringUtils::EqualsNoCase(device.name, "default");
@@ -2086,6 +2093,20 @@ bool CActiveAE::RunStages()
         double maxError = ((*it)->m_syncState == CAESyncInfo::SYNC_INSYNC) ? 1000 : 5000;
         double error = playingPts - (*it)->m_pClock->GetClock();
 
+        // [EVAL_SHADOW][ce12636] Rate-limited check for Jump Sync trigger (>2s) without syscalls
+        if (fabs(error) > ACTIVEAE_SYNC_JUMP_THRESHOLD)
+        {
+          static uint32_t stallLogSkip = 0;
+          if (++stallLogSkip % 60 == 1)
+          {
+            const char* formatConfig = isTrueHDPassthrough ? "TrueHD" :
+                                      (m_settings.passthrough ? "Passthrough" : "PCM");
+            CLog::Log(LOGWARNING, "[EVAL_SHADOW][STALL_DETECTED] Sync error {:.2f}ms > {:.0f}ms! "
+                      "(Clock: {:.2f}ms, Audio: {:.2f}ms, FormatConfig: {}).",
+                      error, ACTIVEAE_SYNC_JUMP_THRESHOLD, (*it)->m_pClock->GetClock(), playingPts, formatConfig);
+          }
+        }
+
         // underestimate error for TrueHD passthrough
         // oscillations should be less than frametime 40ms to avoid unnecessary a/v sync corrections
         if (isTrueHDPassthrough)
@@ -2483,6 +2504,37 @@ CSampleBuffer* CActiveAE::SyncStream(CActiveAEStream *stream)
 
   if (stream->m_syncState == CAESyncInfo::AESyncState::SYNC_START)
   {
+    // [EVAL_SHADOW][19621a9 & ce12636] Lower-overhead 3-state diagnostic priming threshold comparison
+    double speed = stream->m_pClock->GetClockSpeed();
+    float waterLevel = m_stats.GetWaterLevel();
+    
+    float fixedFillThreshold = m_targetBufferLevel * TEMPO_FILL_FACTOR;
+    if (m_settings.lowLatencyMode)
+      fixedFillThreshold = std::min(fixedFillThreshold, TEMPO_FILL_CAP);
+
+    bool baselineWouldHold = (speed > 1.0 && waterLevel < 0.5f);
+    bool ce12636OnlyWouldHold = (speed > 1.0 && waterLevel < fixedFillThreshold);
+    bool fixedWouldHold = (speed > 1.5 && waterLevel < fixedFillThreshold);
+
+    static uint32_t primingEvalSkip = 0;
+    if ((baselineWouldHold || fixedWouldHold || ce12636OnlyWouldHold) && ++primingEvalSkip % 60 == 1)
+    {
+      CLog::Log(LOGDEBUG, "[EVAL_SHADOW][PRIMING_DIVERGENCE] Speed: {:.2f}, WaterLevel: {:.3f} | "
+                "Baseline: {}, ce12636: {}, Final 19621a9: {}",
+                speed, waterLevel, baselineWouldHold, ce12636OnlyWouldHold, fixedWouldHold);
+    }
+
+    // True pre-ce12636 baseline runtime execution branch reusing captured speed & waterLevel (9 logs for 532 calls)
+    if (baselineWouldHold)
+    {
+      static uint32_t primingLogSkip = 0;
+      if (++primingLogSkip % 60 == 1)
+      {
+        CLog::Log(LOGDEBUG, "SyncStream: Priming high-tempo buffer (level: {:f}) [throttled]", waterLevel);
+      }
+      return nullptr;
+    }
+
     stream->m_syncState = CAESyncInfo::AESyncState::SYNC_MUTE;
     stream->m_syncError.Flush(100ms);
     stream->m_processingBuffers->SetRR(1.0, m_settings.atempoThreshold);
