@@ -101,6 +101,13 @@ void CVideoSyncGbm::Run(CEvent& stopEvent)
     if (sequence == m_sequence)
       continue;
 
+    // [EVAL_SHADOW] Rate-limited observation of hardware vblank update intervals
+    static uint32_t vblankLogCount = 0;
+    if (++vblankLogCount % 300 == 1)
+    {
+      CLog::Log(LOGDEBUG, "[EVAL_SHADOW][GBM] Vblank update: seq={}, offset+ns={}", sequence, m_offset + ns);
+    }
+
     m_refClock->UpdateClock(sequence - m_sequence, m_offset + ns);
     m_sequence = sequence;
   }

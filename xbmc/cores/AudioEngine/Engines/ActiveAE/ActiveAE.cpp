@@ -43,6 +43,10 @@ constexpr float MIN_WATER_LEVEL_RESAMPLE = 0.1f; // min buffer time in resample 
 constexpr float BUFFER_LEVEL_INCREMENT = 0.0001f; // increment step for ramp-up
 constexpr double MAX_BUFFER_TIME = 0.1; // max time of a buffer in seconds;
 
+// Diagnostic threshold definitions matching clk_change.diff / PR #28074
+constexpr float TEMPO_FILL_FACTOR = 0.8f;
+constexpr float TEMPO_FILL_CAP = 0.15f;
+
 bool IsDefaultDevice(const AESinkDevice& device)
 {
   return StringUtils::EqualsNoCase(device.name, "default");
@@ -2483,6 +2487,24 @@ CSampleBuffer* CActiveAE::SyncStream(CActiveAEStream *stream)
 
   if (stream->m_syncState == CAESyncInfo::AESyncState::SYNC_START)
   {
+    // [EVAL_SHADOW] Non-blocking diagnostic comparison between master and clk_change.diff
+    double speed = stream->m_pClock->GetClockSpeed();
+    float waterLevel = m_stats.GetWaterLevel();
+
+    float fillThreshold = m_targetBufferLevel * TEMPO_FILL_FACTOR;
+    if (m_settings.lowLatencyMode)
+      fillThreshold = std::min(fillThreshold, TEMPO_FILL_CAP);
+
+    bool masterWouldHold = (speed > 1.0 && waterLevel < 0.5f);
+    bool clkChangeWouldHold = (speed > 1.5 && waterLevel < fillThreshold);
+
+    static uint32_t shadowSkip = 0;
+    if (masterWouldHold != clkChangeWouldHold && ++shadowSkip % 60 == 1)
+    {
+      CLog::Log(LOGDEBUG, "[EVAL_SHADOW][ACTIVEAE] Speed: {:.2f}, Level: {:.3f} | MasterHold: {}, clkChangeHold: {}",
+                speed, waterLevel, masterWouldHold, clkChangeWouldHold);
+    }
+
     stream->m_syncState = CAESyncInfo::AESyncState::SYNC_MUTE;
     stream->m_syncError.Flush(100ms);
     stream->m_processingBuffers->SetRR(1.0, m_settings.atempoThreshold);

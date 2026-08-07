@@ -366,6 +366,12 @@ void CVideoPlayerVideo::Process()
         m_outputSate = OutputPicture(&m_picture);
         if (m_outputSate == OUTPUT_AGAIN)
         {
+          // [EVAL_SHADOW] Observe OUTPUT_AGAIN retry frequency without inserting sleeps
+          static uint32_t retryCount = 0;
+          if (++retryCount % 60 == 1)
+          {
+            CLog::Log(LOGDEBUG, "[EVAL_SHADOW][VIDEOPLAYER] OUTPUT_AGAIN retry triggered (clk_change.diff would snooze 10ms)");
+          }
           onlyPrioMsgs = true;
           continue;
         }
